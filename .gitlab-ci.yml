@@ -1,33 +1,210 @@
+# Настройка GitLab CI для дипломного проекта
+# ✅ ВЕРНАЯ ВЕРСИЯ
+
 stages:
-  - test
-  - deploy
+  - prepare      # Подготовка окружения
+  - test         # Запуск тестов
+  - report       # Генерация отчетов
+  - pages        # Публикация на GitLab Pages
 
-api_tests:
-  stage: test
-  script:
-    - echo "🚀 Запускаю API тесты..."
-    - pip install pytest requests
-    - python -m pytest tests/test_api.py -v
+variables:
+  PYTHON_VERSION: "3.11"
+  ALLURE_VERSION: "2.27.0"
 
-ui_tests:
-  stage: test
-  script:
-    - echo "🖥️ Запускаю UI тесты..."
-    - apt-get update
-    - apt-get install -y wget unzip
-    - pip install pytest selenium
-    - echo "UI тесты пропускаем (нужен Chrome)"
-    - echo "✅ UI тесты пройдены (заглушка)"
+  # Пути (Windows формат)
+  ALLURE_RESULTS: "allure-results"
+  PUBLIC_DIR: "public"
 
-pages:
-  stage: deploy
+# === ШАГ 1: ПОДГОТОВКА ОКРУЖЕНИЯ ===
+prepare:
+  stage: prepare
+  before_script:
+    # Проверяем Python
+    - python --version
+    - pip --version
+
   script:
-    - echo "📊 Генерирую отчет..."
-    - mkdir -p public
-    - echo "<h1>Allure Test Report</h1>" > public/index.html
-    - echo "<p>Тесты выполнены успешно!</p>" >> public/index.html
+    # Создаем виртуальное окружение
+    - echo "Создаю виртуальное окружение..."
+    - python -m venv venv
+
+    # Активируем для Windows
+    - call venv\Scripts\activate
+
+    # Устанавливаем зависимости
+    - echo "Устанавливаю зависимости..."
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+
+    # Дополнительные пакеты для тестов
+    - pip install allure-pytest pytest-xdist selenium webdriver-manager
+
+    # Проверяем установку
+    - pytest --version
+    - allure --version || echo "Allure нужно установить отдельно"
+
   artifacts:
     paths:
-      - public
+      - venv/
+      - .cache/
+    expire_in: 1 hour
+
+# === ШАГ 2: API ТЕСТЫ ===
+api_tests:
+  stage: test
+  before_script:
+    # Активируем окружение
+    - call venv\Scripts\activate
+
+  script:
+    - echo "=== ЗАПУСК API ТЕСТОВ ==="
+
+    # Проверка переменных окружения
+    - echo "BASE_URL: %BASE_URL%"
+    - echo "TANDOOR_USERNAME задан: %TANDOOR_USERNAME%"
+
+    # Запуск API тестов
+    - echo "Запускаю API тесты..."
+    - pytest tests/test_api.py -v --alluredir=%ALLURE_RESULTS%
+
+    # Проверяем результаты
+    - if exist %ALLURE_RESULTS% (
+        echo "Результаты тестов сохранены"
+        dir %ALLURE_RESULTS%
+      ) else (
+        echo "Результаты не найдены"
+      )
+
+  artifacts:
+    when: always
+    paths:
+      - %ALLURE_RESULTS%/
+    expire_in: 1 week
+
+  dependencies:
+    - prepare
+
+# === ШАГ 3: UI ТЕСТЫ ===
+ui_tests:
+  stage: test
+  before_script:
+    - call venv\Scripts\activate
+
+    # Установка ChromeDriver через webdriver-manager (не требует прав)
+    - echo "Настраиваю ChromeDriver..."
+    - python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
+
+  script:
+    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
+
+    # Проверяем что Chrome установлен
+    - where chrome || echo "Chrome не найден в PATH"
+
+    # Запуск UI тестов
+    - echo "Запускаю UI тесты..."
+    - pytest tests/test_ui.py -v --alluredir=%ALLURE_RESULTS%
+
+  artifacts:
+    when: always
+    paths:
+      - %ALLURE_RESULTS%/
+      - screenshots/  # если ваши тесты создают скриншоты
+    expire_in: 1 week
+
+  dependencies:
+    - prepare
+
+# === ШАГ 4: ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ===
+generate_report:
+  stage: report
+  before_script:
+    - call venv\Scripts\activate
+
+  script:
+    - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТА ==="
+
+    # Скачиваем и устанавливаем Allure если не установлен
+    - where allure || (
+        echo "Устанавливаю Allure..."
+        # Скачиваем Allure
+        curl -L -o allure.zip https://github.com/allure-framework/allure2/releases/download/2.27.0/allure-2.27.0.zip
+        # Распаковываем
+        tar -xf allure.zip -C . 2>nul || powershell -Command "Expand-Archive -Path allure.zip -DestinationPath ."
+        # Добавляем в PATH
+        set PATH=%CD%\allure-2.27.0\bin;%PATH%
+      )
+
+    # Проверяем Allure
+    - allure --version
+
+    # Генерируем отчет
+    - echo "Генерирую Allure отчет..."
+    - allure generate %ALLURE_RESULTS% -o %PUBLIC_DIR% --clean
+
+  artifacts:
+    paths:
+      - %PUBLIC_DIR%/
+    expire_in: 30 days
+
+  dependencies:
+    - api_tests
+    - ui_tests
+
   only:
     - main
+
+# === ШАГ 5: ПУБЛИКАЦИЯ НА GITLAB PAGES ===
+pages:
+  stage: pages
+  script:
+    - echo "=== ПУБЛИКАЦИЯ ОТЧЕТА ==="
+
+    # Проверяем что есть что публиковать
+    - if not exist %PUBLIC_DIR%\index.html (
+        echo "❌ Нет отчета для публикации"
+        # Создаем заглушку
+        mkdir %PUBLIC_DIR%
+        echo "<h1>Allure Test Report</h1><p>Отчет будет доступен после успешных тестов</p>" > %PUBLIC_DIR%\index.html
+      )
+
+    - echo "✅ Отчет готов для публикации на GitLab Pages"
+    - echo "Ссылка будет: https://%CI_PROJECT_NAMESPACE%.gitlab.io/%CI_PROJECT_NAME%/"
+
+  artifacts:
+    paths:
+      - %PUBLIC_DIR%
+
+  dependencies:
+    - generate_report
+
+  only:
+    - main
+
+# === ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ ===
+
+# Кэширование (ПРАВИЛЬНО)
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - venv/
+    - .cache/pip/
+    - allure-*/  # Кэшируем Allure
+  policy: pull-push  # ✅ ВЕРНО!
+
+# Отправляем уведомления
+workflow:
+  rules:
+    # Если коммит в main - запускаем весь пайплайн
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      variables:
+        RUN_FULL_PIPELINE: "true"
+
+    # Для merge request - только тесты
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      variables:
+        RUN_FULL_PIPELINE: "false"
+
+    # Для других веток - тоже только тесты
+    - when: always
+      variables:
+        RUN_FULL_PIPELINE: "false"
