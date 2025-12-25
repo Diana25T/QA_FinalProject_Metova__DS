@@ -1,0 +1,6 @@
+# .gitlab-ci.yml
+test_hello:
+  script:
+    - echo "🎉 ПРИВЕТ! Мой первый CI/CD!"
+    - echo "Я работаю в GitLab CI!"
+    - python --version

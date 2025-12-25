@@ -1,0 +1,170 @@
+Index: tests/test_api_client.py
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/tests/test_api_client.py b/tests/test_api_client.py
+--- a/tests/test_api_client.py
++++ b/tests/test_api_client.py	(date 1764679633870)
+@@ -4,6 +4,7 @@
+ from tests.conftest import basic_recipe_data, api_client
+ 
+ 
++@pytest.mark.api
+ def test_bearer_token_auth():
+     """Тестируем аутентификацию через Bearer Token"""
+     client = TandoorAPIClient()
+@@ -18,6 +19,7 @@
+     print(f" Найдено рецептов: {recipes['results']}")
+ 
+ 
++@pytest.mark.api
+ def test_api_health(api_client):
+     """Проверяет доступность API"""
+     try:
+@@ -30,8 +32,9 @@
+ 
+ 
+ @pytest.mark.api
+-def test_api_get_recipe(api_client):
+-    """Получает список всех рецептов через API"""
++def test_get_recipes(api_client):
++    """Тест успешного выполнения запроса получения списка рецептов через  API
++     и проверка наличия ключа 'results'"""
+     all_recipes = api_client.get_recipes()
+     assert all_recipes is not None, "API не вернул ответ"
+     assert 'results' in all_recipes, "Ответ API не содержит ключ 'results'"
+@@ -40,133 +43,6 @@
+     assert len(result) > 0, "Список рецептов пусой"
+ 
+ 
+-@pytest.mark.api
+-def test_import_recipes(recipe_data):
+-    """Тест импорта рецептов по URL"""
+-    print(f" Всего успешно импортировано и сохранено рецептов: {len(recipe_data)}")
+-
+-    # Проверяем уникальность ID
+-    unique_ids = set(recipe_data)
+-    assert len(unique_ids) == len(recipe_data), f"Обнаружены дубликаты ID: {recipe_data}"
+-
+-    # Проверяем, что рецепты действительно сохранены в базе
+-    for recipe_id in recipe_data:
+-        print(f" Рецепт сохранен с ID: {recipe_id}")
+-
+-    # Минимальная проверка - что хотя бы некоторые рецепты импортировались
+-    assert len(recipe_data) > 0, "Ни один рецепт не был успешно импортирован и сохранен"
+-
+-    print(f" Все рецепты уникальны и подтверждены в базе данных!")
+-
+-
+-@pytest.mark.api
+-def test_create_recipe(api_client, basic_recipe_data):
+-    """Тестирует создание простого рецепта через API"""
+-    print("Тестируем создание рецепта...")
+-
+-    new_recipe = api_client.create_recipe(basic_recipe_data)
+-
+-    assert new_recipe is not None, "Рецепт должен быть создан"
+-    assert 'id' in new_recipe, "'id' должен быть"
+-    assert new_recipe['name'] == basic_recipe_data['name'], "Имя рецепта должно совпадать"
+-
+-    print(f" Рецепт создан: {new_recipe['name']} (ID: {new_recipe['id']})")
+-
+-
+-@pytest.mark.api
+-def test_import_recipes(api_client, recipe_data):
+-    """Тест импорта рецепта по ID"""
+-    for recipe_id in recipe_data:
+-        response = api_client.get_recipe_by_id(recipe_id)
+-        assert response.status_code == 200
+-        data = response.json()
+-        assert 'name' in data
+-        assert 'ingredients' in data
+-
+-
+-@pytest.mark.api
+-def test_delite_recipe_by_id(api_client, existing_or_new_recipe):
+-    """Проверка удаления рецепта по id"""
+-    recipe_data = existing_or_new_recipe
+-    recipe_id = recipe_data['id']
+-    recipe_name = recipe_data['name']
+-    print(f" Получено id: {recipe_id}, name: {recipe_name}")
+-
+-    # Проверяем существование рецепта до удаления
+-    all_recipes_before = api_client.get_recipes()
+-    recipes_list_before = all_recipes_before.get('results', [])
+-    recipe_exists_before = any(recipe['id'] == recipe_id for recipe in recipes_list_before)
+-    print(f" Рецепт существует до удаления: {recipe_exists_before}")
+-
+-    # Удаляем рецепт
+-    deleted = api_client.delete_recipe(recipe_id)
+-    all_recipes_after = api_client.get_recipes()
+-    recipes_list_after = all_recipes_after.get('results', [])
+-    print(f"Результат удаления: {deleted}")
+-
+-    # Проверяем, что рецепт удален фактически
+-    all_recipes_after = api_client.get_recipes()
+-    recipes_list_after = all_recipes_after.get('results', [])
+-    recipe_exists_after = any(recipe['id'] == recipe_id for recipe in recipes_list_after)
+-    print(f"Рецепт сущетвует после удаления: {recipe_exists_after}")
+-
+-    # УСПЕШНЫМ считаем, если рецепта больше нет в списке
+-    actual_deleted = not recipe_exists_after
+-    print(f" Фактическое удаление: {actual_deleted}")
+-
+-    assert actual_deleted, "Рецепт существует после удаления"
+-    print(f" Удален id: {recipe_id}, name: {recipe_name}")
+-
+-
+-@pytest.mark.api
+-def test_remove_dublicate_recipes(api_client):
+-    """Тест для удаления повторяющихся рецептов"""
+-    print("Ищем повторяющиея рецепты")
+-
+-    # 1. Получаем все рецепты из системы
+-    response = api_client.get_recipes()
+-    if not response or 'results' not in response:
+-        print("Не получилось загрузить рецепты")
+-        return
+-
+-    recipes = response['results']
+-    print(f"Всего найдено рецептов: {len(recipes)}")
+-
+-    # 2. Ищем с одинаковыми названиями
+-
+-    recipe_names = {}
+-    dublicates = []
+ 
+-    for recipe in recipes:
+-        name = recipe['name']
+-        recipe_id = recipe['id']
+ 
+-        if name in recipe_names:
+-            # Нашли дубликат
+-            dublicates.append(recipe)
+-            print(f"Найден дубликат: {name}, ID: {recipe_id}")
+-        else:
+-            # Первый раз видим название
+-            recipe_names[name] = recipe_id
+ 
+-    # 3. Если дубликатов нет -закачиваем
+-    if not dublicates:
+-        print("Дубликатов не найдено")
+-        return
+-
+-    print(f"Найдено: {len(dublicates)} дубликатов для удаления")
+-
+-    # 4. Удаляем дубликаты
+-    deleted_count = 0
+-    for recipe in dublicates:
+-        print(f" Удаляем: '{recipe['name']}'(ID: {recipe['id']})")
+-
+-    # 5. Пытаемся удалить рецепт
+-    success = api_client.delete_recipe(recipe['id'])
+-    if success:
+-        deleted_count += 1
+-        print(f"Успешно удален: {deleted_count}")
+-
+-    # 6. Результаты
+-    print(f"Готово!Удалено: {deleted_count} дубликатов")
+-    print(f" Осталось {len(recipes) - deleted_count} уникальных рецептов")
