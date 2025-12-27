@@ -1,20 +1,6 @@
-# Простейший рабочий вариант для Windows
+# .gitlab-ci.yml
 test:
-  tags:
-    - saas-windows-medium-amd64
+  image: python:3.11-slim
   script:
-    - Write-Host "✅ CI/CD работает на Windows!"
-    - python --version
     - pip install pytest
-    - pytest --version
-
-pages:
-  tags:
-    - saas-windows-medium-amd64
-  script:
-    - mkdir -Force public
-    - echo "<h1>Allure Report</h1>" > public/index.html
-    - echo "<p>Windows Runner работает!</p>" >> public/index.html
-  artifacts:
-    paths:
-      - public
+    - pytest tests/ --alluredir=allure-results
