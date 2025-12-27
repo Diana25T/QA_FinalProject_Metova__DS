@@ -1,6 +1,26 @@
-# .gitlab-ci.yml
-test:
+# .gitlab-ci.yml - для диплома (простой)
+stages:
+  - test
+  - report
+
+api_test:
+  stage: test
   image: python:3.11-slim
   script:
-    - pip install pytest
-    - pytest tests/ --alluredir=allure-results
+    - pip install pytest allure-pytest requests
+    - mkdir -p allure-results
+    - pytest tests/test_api.py -v --alluredir=allure-results
+  artifacts:
+    paths:
+      - allure-results/
+
+allure_report:
+  stage: report
+  image: frankescobar/allurecli:latest
+  script:
+    - allure generate allure-results -o public
+  artifacts:
+    paths:
+      - public/
+  only:
+    - main
