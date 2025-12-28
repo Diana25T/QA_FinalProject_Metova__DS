@@ -1,17 +1,17 @@
-import sys
-import time
 import json
 import os
+import sys
+import time
+from datetime import datetime, timedelta
 
 import allure
 import pytest
-from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+
 from api.client import TandoorAPIClient
-from dotenv import load_dotenv
 from pages.login_page import LoginPage
 
 # Загружаем переменные окружения
@@ -425,46 +425,29 @@ def cleanup_test_data(api_client):
 
 
 # ======================== ФИКСТУРЫ UI ========================
+
 @pytest.fixture(scope="function")
 def driver():
-    """Фикстура для работы с браузером в CI и локально"""
+    """Фикстура браузера с автоматическим скачиванием драйвера"""
+
+    # Создаем опции для Chrome
+    from selenium.webdriver.chrome.options import Options
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--window-size=1920,1080")
 
-    # В CI используем Selenium из services
-    if os.getenv('CI'):
-        print("🚀 CI режим: подключаемся к Selenium...")
+    # Если запущено в CI, используем headless режим
+    if os.getenv('CI') or os.getenv('GITLAB_CI'):
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # ИСПРАВЛЕНО: используем имя из переменной окружения
-        selenium_host = os.getenv('SELENIUM_HOST', 'selenium')  # Без двойного подчеркивания!
-        selenium_url = f"http://{selenium_host}:4444/wd/hub"
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    driver.implicitly_wait(10)
+    driver.get(os.getenv('BASE_URL'))
 
-        print(f"🔗 Подключаемся к: {selenium_url}")
+    yield driver
+    driver.quit()
 
-        try:
-            driver = webdriver.Remote(
-                command_executor=selenium_url,
-                options=chrome_options
-            )
-            print("✅ Успешно подключились к Selenium")
-            yield driver
-            driver.quit()
-        except Exception as e:
-            print(f"❌ Ошибка подключения к Selenium: {e}")
-            # Пробуем запустить локально как fallback
-            print("🔄 Пробуем запустить локальный драйвер...")
-            driver = webdriver.Chrome(options=chrome_options)
-            yield driver
-            driver.quit()
-    else:
-        # Локальный режим
-        print("💻 Локальный режим: используем локальный Chrome")
-        driver = webdriver.Chrome(options=chrome_options)
-        yield driver
-        driver.quit()
 
 @pytest.fixture
 def login(browser) -> LoginPage:
