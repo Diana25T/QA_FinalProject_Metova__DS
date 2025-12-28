@@ -428,7 +428,6 @@ def cleanup_test_data(api_client):
 @pytest.fixture(scope="function")
 def driver():
     """Фикстура для работы с браузером в CI и локально"""
-
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
@@ -439,8 +438,8 @@ def driver():
     if os.getenv('CI'):
         print("🚀 CI режим: подключаемся к Selenium...")
 
-        # Получаем хост из переменной или используем дефолтный
-        selenium_host = os.getenv('SELENIUM_HOST', 'selenium__standalone-chrome')
+        # ИСПРАВЛЕНО: используем имя из переменной окружения
+        selenium_host = os.getenv('SELENIUM_HOST', 'selenium')  # Без двойного подчеркивания!
         selenium_url = f"http://{selenium_host}:4444/wd/hub"
 
         print(f"🔗 Подключаемся к: {selenium_url}")
@@ -450,23 +449,22 @@ def driver():
                 command_executor=selenium_url,
                 options=chrome_options
             )
-            print("✅ Selenium подключен успешно")
-            driver.implicitly_wait(10)
-            return driver
+            print("✅ Успешно подключились к Selenium")
+            yield driver
+            driver.quit()
         except Exception as e:
             print(f"❌ Ошибка подключения к Selenium: {e}")
-            print("⚠️  Проверьте services в .gitlab-ci.yml")
-            raise
-
-    # Локальный запуск
-    print("💻 Локальный режим: используем ChromeDriver")
-    from selenium.webdriver.chrome.service import Service
-    from webdriver_manager.chrome import ChromeDriverManager
-
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.implicitly_wait(10)
-    return driver
+            # Пробуем запустить локально как fallback
+            print("🔄 Пробуем запустить локальный драйвер...")
+            driver = webdriver.Chrome(options=chrome_options)
+            yield driver
+            driver.quit()
+    else:
+        # Локальный режим
+        print("💻 Локальный режим: используем локальный Chrome")
+        driver = webdriver.Chrome(options=chrome_options)
+        yield driver
+        driver.quit()
 
 @pytest.fixture
 def login(browser) -> LoginPage:
