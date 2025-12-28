@@ -52,9 +52,7 @@ ui_tests:
   services:
     - selenium/standalone-chrome:latest  # ← ДОБАВЬТЕ ЭТО!
   variables:
-    # Передаем URL из переменных GitLab
-    BASE_URL: "$BASE_URL"
-    TANDOOR_TOKEN: "$ TANDOOR_TOKEN"
+    PYTHONPATH: "${CI_PROJECT_DIR}"
     # Для Selenium в services используем имя сервиса
     SELENIUM_HOST: "selenium__standalone-chrome"
   before_script:
