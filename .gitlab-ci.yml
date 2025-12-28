@@ -47,21 +47,28 @@ api_tests:
 # ШАГ 3: UI-ТЕСТЫ. Используем Selenium в Docker и запускаем UI-тесты
 ui_tests:
   stage: test_ui
-  image: selenium/standalone-chrome:latest # Контейнер с браузером
+  # ИСПРАВЛЕНО: Используем другой образ с Selenium
+  image: selenium/standalone-chrome:latest
+  services:
+    - selenium/standalone-chrome:latest  # ← ДОБАВЬТЕ ЭТО!
   variables:
-    BASE_URL: $BASE_URL # Передаем переменную из настроек CI
-  script:
-    - apt-get update && apt-get install -y python3-pip
+    # Передаем URL из переменных GitLab
+    BASE_URL: "$BASE_URL"
+    # Для Selenium в services используем имя сервиса
+    SELENIUM_HOST: "selenium__standalone-chrome"
+  before_script:
+    # Установка Python в контейнере Selenium
+    - apt-get update && apt-get install -y python3-pip python3-venv
     - pip3 install --upgrade pip
+  script:
     - pip3 install -r requirements.txt
     - python3 -m pytest tests/ -m ui -v --alluredir=allure-results-ui
   artifacts:
     when: always
     paths:
       - allure-results-ui/
-      - screenshots/ # Сохраняем скриншоты падений
+      - screenshots/
     expire_in: 1 week
-
 # ШАГ 4: ГЕНЕРАЦИЯ И ПУБЛИКАЦИЯ ОТЧЕТА
 generate_allure_report:
   stage: report
