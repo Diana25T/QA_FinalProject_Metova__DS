@@ -1,132 +1,62 @@
 stages:
-  - prepare
   - test
   - report
 
 variables:
   BASE_URL: "https://app.tandoor.dev"
-  PYTHON_VERSION: "3.10"
-  CHROME_VERSION: "latest"
 
-# Кэширование для ускорения сборок
-cache:
-  paths:
-    - .cache/pip
-    - venv/
-  key: "${CI_COMMIT_REF_SLUG}"
+# Используем образ с Python и Chrome
+image: python:3.10
 
 before_script:
-  - apt-get update -qy
-  - apt-get install -y wget unzip
-  - python --version
-  - pip --version
-  - pip install virtualenv
-  - virtualenv venv
-  - source venv/bin/activate
+  - apt-get update
+  - apt-get install -y wget unzip gnupg
+  # Установка Chrome
+  - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+  - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
+  - apt-get update
+  - apt-get install -y google-chrome-stable
+  # Установка ChromeDriver
+  - wget https://chromedriver.storage.googleapis.com/$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE)/chromedriver_linux64.zip
+  - unzip chromedriver_linux64.zip
+  - mv chromedriver /usr/local/bin/
+  - chmod +x /usr/local/bin/chromedriver
+  # Установка Python зависимостей
   - pip install --upgrade pip
   - pip install -r requirements.txt
 
-# Установка Chrome и ChromeDriver для UI тестов
-install_chrome:
-  stage: prepare
-  script:
-    - echo "Installing Chrome and ChromeDriver..."
-    # Установка Chrome
-    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
-    - apt-get update -y
-    - apt-get install -y google-chrome-stable
-    # Установка ChromeDriver
-    - CHROME_DRIVER_VERSION=$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE)
-    - wget -N https://chromedriver.storage.googleapis.com/${CHROME_DRIVER_VERSION}/chromedriver_linux64.zip -P /tmp/
-    - unzip -o /tmp/chromedriver_linux64.zip -d /usr/local/bin/
-    - chmod +x /usr/local/bin/chromedriver
-    # Проверка установки
-    - google-chrome --version
-    - chromedriver --version
-  artifacts:
-    paths:
-      - /usr/local/bin/chromedriver
-    expire_in: 1 hour
-
-# API тесты
-api_tests:
+# Запуск всех тестов
+run_tests:
   stage: test
-  variables:
-    BASE_URL: $BASE_URL
-    TANDOOR_TOKEN: $TANDOOR_TOKEN
-    TANDOOR_USERNAME: $TANDOOR_USERNAME
-    TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   script:
-    - echo "Running API tests..."
-    - source venv/bin/activate
-    - python -m pytest tests/test_api_client.py -v --alluredir=allure-results
-    - python -m pytest tests/ -v -m api --alluredir=allure-results
+    - echo "Running all tests..."
+    - python -m pytest tests/ -v --alluredir=allure-results
   artifacts:
     when: always
     paths:
       - allure-results/
     expire_in: 1 week
-  tags:
-    - api
 
-# UI тесты
-ui_tests:
-  stage: test
-  variables:
-    BASE_URL: $BASE_URL
-    TANDOOR_TOKEN: $TANDOOR_TOKEN
-    TANDOOR_USERNAME: $TANDOOR_USERNAME
-    TANDOOR_PASSWORD: $TANDOOR_PASSWORD
-  script:
-    - echo "Running UI tests..."
-    - source venv/bin/activate
-    # Установка переменных для headless режима
-    - export DISPLAY=:99.0
-    - Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
-    - python -m pytest tests/ -v -m "not api" --alluredir=allure-results
-  artifacts:
-    when: always
-    paths:
-      - allure-results/
-      - screenshots/
-    expire_in: 1 week
-  dependencies:
-    - install_chrome
-  tags:
-    - ui
-
-# Генерация Allure отчетов
-generate_allure_report:
+# Генерация отчета
+generate_report:
   stage: report
-  image: frankescobar/allure-docker-service
   script:
-    - echo "Generating Allure report..."
+    - pip install allure-pytest
     - allure generate --clean allure-results -o public
   artifacts:
     paths:
       - public
     expire_in: 30 days
-  dependencies:
-    - api_tests
-    - ui_tests
   only:
     - main
-    - master
-    - develop
 
-# Публикация отчетов на GitLab Pages
+# Публикация на Pages
 pages:
   stage: report
   script:
-    - echo "Publishing Allure report to GitLab Pages..."
     - mv public public_html
   artifacts:
     paths:
       - public_html
-  dependencies:
-    - generate_allure_report
   only:
     - main
-    - master
-    - develop
