@@ -30,6 +30,9 @@ prepare:
 # ШАГ 2: API-ТЕСТЫ. Запускаем тесты с пометкой 'api'
 api_tests:
   stage: test_api
+  before_script:
+    - echo "BASE_URL = $BASE_URL"
+    - echo "TANDOOR_URL = $TANDOOR_URL"
   script:
     - source venv/bin/activate
     - pytest tests/ -m api -v --alluredir=allure-results
@@ -49,6 +52,7 @@ ui_tests:
     BASE_URL: $BASE_URL # Передаем переменную из настроек CI
   script:
     - apt-get update && apt-get install -y python3-pip
+    - pip3 install --upgrade pip
     - pip3 install -r requirements.txt
     - python3 -m pytest tests/ -m ui -v --alluredir=allure-results-ui
   artifacts:
