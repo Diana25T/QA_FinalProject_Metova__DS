@@ -7,6 +7,7 @@ import allure
 import pytest
 from datetime import datetime, timedelta
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from api.client import TandoorAPIClient
@@ -426,15 +427,32 @@ def cleanup_test_data(api_client):
 # ======================== ФИКСТУРЫ UI ========================
 @pytest.fixture(scope="function")
 def driver():
-    """Фикстура браузера с автоматическим скачиванием драйвера"""
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service)
-    driver.implicitly_wait(10)
-    driver.get(os.getenv('BASE_URL'))
+    # Проверяем, выполняется ли код в среде CI (например, GitLab CI)
+    if os.getenv('CI'):
+        print("Запуск в CI: подключение к удаленному Selenium Hub...")
+        # Вариант для CI: подключаемся к Selenium в отдельном контейнере
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
 
+        # Указываем адрес Selenium Standalone Chrome
+        driver = webdriver.Remote(
+            command_executor='http://selenium__standalone-chrome:4444/wd/hub',
+            options=chrome_options
+        )
+    else:
+        print("Локальный запуск: инициализация ChromeDriver...")
+        # Вариант для локальной машины
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")  # Браузер без графического интерфейса
+        # Автоматическая установка и использование актуального ChromeDriver
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    driver.implicitly_wait(10)
     yield driver
     driver.quit()
-
 
 @pytest.fixture
 def login(browser) -> LoginPage:
