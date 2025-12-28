@@ -427,32 +427,46 @@ def cleanup_test_data(api_client):
 # ======================== ФИКСТУРЫ UI ========================
 @pytest.fixture(scope="function")
 def driver():
-    # Проверяем, выполняется ли код в среде CI (например, GitLab CI)
+    """Фикстура для работы с браузером в CI и локально"""
+
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+
+    # В CI используем Selenium из services
     if os.getenv('CI'):
-        print("Запуск в CI: подключение к удаленному Selenium Hub...")
-        # Вариант для CI: подключаемся к Selenium в отдельном контейнере
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
+        print("🚀 CI режим: подключаемся к Selenium...")
 
-        # Указываем адрес Selenium Standalone Chrome
-        driver = webdriver.Remote(
-            command_executor='http://selenium__standalone-chrome:4444/wd/hub',
-            options=chrome_options
-        )
-    else:
-        print("Локальный запуск: инициализация ChromeDriver...")
-        # Вариант для локальной машины
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Браузер без графического интерфейса
-        # Автоматическая установка и использование актуального ChromeDriver
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Получаем хост из переменной или используем дефолтный
+        selenium_host = os.getenv('SELENIUM_HOST', 'selenium__standalone-chrome')
+        selenium_url = f"http://{selenium_host}:4444/wd/hub"
 
+        print(f"🔗 Подключаемся к: {selenium_url}")
+
+        try:
+            driver = webdriver.Remote(
+                command_executor=selenium_url,
+                options=chrome_options
+            )
+            print("✅ Selenium подключен успешно")
+            driver.implicitly_wait(10)
+            return driver
+        except Exception as e:
+            print(f"❌ Ошибка подключения к Selenium: {e}")
+            print("⚠️  Проверьте services в .gitlab-ci.yml")
+            raise
+
+    # Локальный запуск
+    print("💻 Локальный режим: используем ChromeDriver")
+    from selenium.webdriver.chrome.service import Service
+    from webdriver_manager.chrome import ChromeDriverManager
+
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.implicitly_wait(10)
-    yield driver
-    driver.quit()
+    return driver
 
 @pytest.fixture
 def login(browser) -> LoginPage:
