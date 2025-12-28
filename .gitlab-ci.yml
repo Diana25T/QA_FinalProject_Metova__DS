@@ -32,7 +32,7 @@ api_tests:
   stage: test_api
   before_script:
     - echo "BASE_URL = $BASE_URL"
-    - echo "TANDOOR_URL = $TANDOOR_URL"
+    - echo "TANDOOR_TOKEN = $TANDOOR_TOKEN"
   script:
     - source venv/bin/activate
     - pytest tests/ -m api -v --alluredir=allure-results
