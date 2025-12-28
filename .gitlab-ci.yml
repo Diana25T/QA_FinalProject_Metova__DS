@@ -54,6 +54,7 @@ ui_tests:
   variables:
     # Передаем URL из переменных GitLab
     BASE_URL: "$BASE_URL"
+    TANDOOR_TOKEN: "$ TANDOOR_TOKEN"
     # Для Selenium в services используем имя сервиса
     SELENIUM_HOST: "selenium__standalone-chrome"
   before_script:
@@ -61,6 +62,7 @@ ui_tests:
     - apt-get update && apt-get install -y python3-pip python3-venv
     - pip3 install --upgrade pip
   script:
+    - echo "BASE_URL = $BASE_URL"
     - pip3 install -r requirements.txt
     - python3 -m pytest tests/ -m ui -v --alluredir=allure-results-ui
   artifacts:
