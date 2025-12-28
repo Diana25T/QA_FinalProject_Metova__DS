@@ -2,45 +2,70 @@ stages:
   - test_api
   - test_ui
   - report
+  - deploy
 
 variables:
   BASE_URL: "http://tandoor:80"
-  SELENIUM_HOST: "selenium"
+  SELENIUM_HOST: "selenium"  # Исправлено: без двойного подчеркивания
 
-# Job 1: API тесты
 api_tests:
   stage: test_api
   image: python:3.11-slim
-  services:  # ← ЗДЕСЬ ДОБАВЛЯЕМ TANDOOR
+  services:
     - name: vabene1111/recipes:latest
       alias: tandoor
   script:
     - echo "🚀 Запуск API тестов..."
     - pip install -r requirements.txt
     - echo "BASE_URL = $BASE_URL"
-    # Проверяем доступность Tandoor
-    - timeout 30 bash -c 'until curl -s http://tandoor:80 > /dev/null; do sleep 2; echo "⏳ Ждем Tandoor..."; done'
+
+    # УВЕЛИЧИВАЕМ ВРЕМЯ ОЖИДАНИЯ - Tandoor долго запускается
+    - echo "⏳ Ожидаем полный запуск Tandoor (может занять до 3 минут)..."
+    - |
+      for i in {1..36}; do
+        if curl -s -f "http://tandoor:80/api/" > /dev/null 2>&1; then
+          echo "✅ Tandoor API полностью готов (попытка $i/36)"
+          break
+        elif [ $i -eq 36 ]; then
+          echo "❌ Tandoor API не запустился за 3 минуты"
+          echo "Проверяем что доступно:"
+          curl -I "http://tandoor:80/" || echo "Сервер не отвечает"
+          exit 1
+        else
+          echo "⏳ Ожидание... ($i/36) - 5 секунд"
+          sleep 5
+        fi
+      done
+
+    # Проверяем health endpoint
+    - echo "🔍 Проверяем health endpoint..."
+    - curl -s "http://tandoor:80/api/health/" | head -20 || echo "Health check не прошел"
+
     - pytest tests/ -m api -v --alluredir=allure-results
 
-# Job 2: UI тесты
 ui_tests:
   stage: test_ui
   image: python:3.11-slim
-  services:  # ← ЗДЕСЬ ДОБАВЛЯЕМ TANDOOR И SELENIUM
+  services:
     - name: vabene1111/recipes:latest
       alias: tandoor
     - name: selenium/standalone-chrome:latest
-      alias: selenium
+      alias: selenium  # Исправлено: должно совпадать с переменной
   script:
     - echo "🚀 Запуск UI тестов..."
     - pip install -r requirements.txt
     - echo "BASE_URL = $BASE_URL"
     - echo "SELENIUM_HOST = $SELENIUM_HOST"
+
     # Ждем запуск сервисов
-    - sleep 20
+    - echo "⏳ Ожидаем сервисы..."
+    # Ждем Tandoor
+    - timeout 180 bash -c 'until curl -s -f http://tandoor:80/api/ > /dev/null; do sleep 10; echo "Ждем Tandoor..."; done'
+    # Ждем Selenium
+    - timeout 60 bash -c 'until curl -s -f http://selenium:4444/wd/hub/status > /dev/null; do sleep 5; echo "Ждем Selenium..."; done'
+
     - pytest tests/ -m ui -v --alluredir=allure-results
 
-# Job 3: Генерация отчета
 generate_report:
   stage: report
   image: frankescobar/allure-docker-service
