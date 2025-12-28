@@ -8,6 +8,7 @@ import allure
 import pytest
 from dotenv import load_dotenv
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -426,28 +427,47 @@ def cleanup_test_data(api_client):
 
 # ======================== ФИКСТУРЫ UI ========================
 
-@pytest.fixture(scope="function")
 def driver():
-    """Фикстура браузера с автоматическим скачиванием драйвера"""
+    """Фикстура браузера для локального и CI запуска"""
 
-    # Создаем опции для Chrome
-    from selenium.webdriver.chrome.options import Options
     chrome_options = Options()
 
-    # Если запущено в CI, используем headless режим
-    if os.getenv('CI') or os.getenv('GITLAB_CI'):
+    # Определяем, работаем ли в CI среде
+    is_ci = os.getenv('CI') or os.getenv('GITLAB_CI')
+
+    if is_ci:
+        # Настройки для CI/CD
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-software-rasterizer')
 
-    service = Service(ChromeDriverManager().install())
+        # Используем системный Chrome в CI
+        service = Service()
+    else:
+        # Настройки для локального запуска
+        chrome_options.add_argument('--start-maximized')
+        # Используем webdriver-manager для автоскачивания драйвера
+        service = Service(ChromeDriverManager().install())
+
+    # Создаем драйвер
     driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    # Настройки ожиданий
     driver.implicitly_wait(10)
-    driver.get(os.getenv('BASE_URL'))
+    driver.set_page_load_timeout(30)
+
+    # Переходим на сайт
+    base_url = os.getenv('BASE_URL')
+    driver.get(base_url)
 
     yield driver
-    driver.quit()
 
+    # Закрываем браузер после теста
+    driver.quit()
 
 @pytest.fixture
 def login(browser) -> LoginPage:
