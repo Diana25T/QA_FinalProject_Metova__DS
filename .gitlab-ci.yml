@@ -1,91 +1,51 @@
-# Используем образ с Python
-image: python:3.11-slim
-
-# Определяем этапы пайплайна по порядку
 stages:
-  - prepare
   - test_api
   - test_ui
   - report
 
-# Кэшируем pip-пакеты для ускорения
-cache:
-  key: ${CI_COMMIT_REF_SLUG}
-  paths:
-    - .cache/pip
+variables:
+  BASE_URL: "http://tandoor:80"
+  SELENIUM_HOST: "selenium"
 
-# ШАГ 1: ПОДГОТОВКА. Создаем виртуальное окружение и ставим зависимости
-prepare:
-  stage: prepare
-  script:
-    - pip install virtualenv
-    - virtualenv venv
-    - source venv/bin/activate
-    - pip install -r requirements.txt pytest selenium requests allure-pytest pytest-html webdriver-manager
-  artifacts:
-    paths:
-      - venv/ # Сохраняем окружение для следующих этапов
-    expire_in: 1 hour
-
-# ШАГ 2: API-ТЕСТЫ. Запускаем тесты с пометкой 'api'
+# Job 1: API тесты
 api_tests:
   stage: test_api
-  services:
-    - name: vabene1111/recipes:latest  # Запускает контейнер Tandoor
+  image: python:3.11-slim
+  services:  # ← ЗДЕСЬ ДОБАВЛЯЕМ TANDOOR
+    - name: vabene1111/recipes:latest
       alias: tandoor
-  before_script:
-    - echo "BASE_URL = $BASE_URL"
-    - echo "TANDOOR_TOKEN = $TANDOOR_TOKEN"
   script:
-    - source venv/bin/activate
+    - echo "🚀 Запуск API тестов..."
+    - pip install -r requirements.txt
+    - echo "BASE_URL = $BASE_URL"
+    # Проверяем доступность Tandoor
+    - timeout 30 bash -c 'until curl -s http://tandoor:80 > /dev/null; do sleep 2; echo "⏳ Ждем Tandoor..."; done'
     - pytest tests/ -m api -v --alluredir=allure-results
-  artifacts:
-    when: always
-    paths:
-      - allure-results/ # Сохраняем сырые данные для Allure
-    expire_in: 1 week
-  dependencies:
-    - prepare # Ждем завершения этапа подготовки
 
-# ШАГ 3: UI-ТЕСТЫ. Используем Selenium в Docker и запускаем UI-тесты
+# Job 2: UI тесты
 ui_tests:
   stage: test_ui
-  # ИСПРАВЛЕНО: Используем другой образ с Selenium
-  image: selenium/standalone-chrome:latest
-  services:
-    - selenium/standalone-chrome:latest  # ← ДОБАВЬТЕ ЭТО!
-  variables:
-    PYTHONPATH: "${CI_PROJECT_DIR}"
-    # Для Selenium в services используем имя сервиса
-    SELENIUM_HOST: "selenium__standalone-chrome"
-  before_script:
-    # Установка Python в контейнере Selenium
-    - apt-get update && apt-get install -y python3-pip python3-venv
-    - pip3 install --upgrade pip
+  image: python:3.11-slim
+  services:  # ← ЗДЕСЬ ДОБАВЛЯЕМ TANDOOR И SELENIUM
+    - name: vabene1111/recipes:latest
+      alias: tandoor
+    - name: selenium/standalone-chrome:latest
+      alias: selenium
   script:
+    - echo "🚀 Запуск UI тестов..."
+    - pip install -r requirements.txt
     - echo "BASE_URL = $BASE_URL"
-    - pip3 install -r requirements.txt
-    - python3 -m pytest tests/ -m ui -v --alluredir=allure-results-ui
-  artifacts:
-    when: always
-    paths:
-      - allure-results-ui/
-      - screenshots/
-    expire_in: 1 week
-# ШАГ 4: ГЕНЕРАЦИЯ И ПУБЛИКАЦИЯ ОТЧЕТА
-generate_allure_report:
+    - echo "SELENIUM_HOST = $SELENIUM_HOST"
+    # Ждем запуск сервисов
+    - sleep 20
+    - pytest tests/ -m ui -v --alluredir=allure-results
+
+# Job 3: Генерация отчета
+generate_report:
   stage: report
+  image: frankescobar/allure-docker-service
   script:
-    # Устанавливаем Allure
-    - apt-get update && apt-get install -y default-jre
-    - wget https://github.com/allure-framework/allure2/releases/download/2.28.0/allure-2.28.0.tgz
-    - tar -xzf allure-2.28.0.tgz -C /opt/
-    - ln -s /opt/allure-2.28.0/bin/allure /usr/bin/allure
-    # Генерируем отчет из результатов API и UI тестов
-    - allure generate allure-results allure-results-ui --clean -o public
+    - allure generate allure-results --clean -o public
   artifacts:
     paths:
-      - public/ # Папка с готовым HTML-отчетом
-    expire_in: 30 days
-  rules:
-    - if: $CI_COMMIT_BRANCH == "main" # Публикуем отчет только для ветки main
+      - public
