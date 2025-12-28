@@ -1,76 +1,132 @@
 stages:
-  - test_api
-  - test_ui
+  - prepare
+  - test
   - report
-  - deploy
 
 variables:
-  BASE_URL: "http://tandoor:80"
-  SELENIUM_HOST: "selenium"  # Исправлено: без двойного подчеркивания
+  BASE_URL: "https://app.tandoor.dev"
+  PYTHON_VERSION: "3.10"
+  CHROME_VERSION: "latest"
 
+# Кэширование для ускорения сборок
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+  key: "${CI_COMMIT_REF_SLUG}"
+
+before_script:
+  - apt-get update -qy
+  - apt-get install -y wget unzip
+  - python --version
+  - pip --version
+  - pip install virtualenv
+  - virtualenv venv
+  - source venv/bin/activate
+  - pip install --upgrade pip
+  - pip install -r requirements.txt
+
+# Установка Chrome и ChromeDriver для UI тестов
+install_chrome:
+  stage: prepare
+  script:
+    - echo "Installing Chrome and ChromeDriver..."
+    # Установка Chrome
+    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
+    - apt-get update -y
+    - apt-get install -y google-chrome-stable
+    # Установка ChromeDriver
+    - CHROME_DRIVER_VERSION=$(curl -sS chromedriver.storage.googleapis.com/LATEST_RELEASE)
+    - wget -N https://chromedriver.storage.googleapis.com/${CHROME_DRIVER_VERSION}/chromedriver_linux64.zip -P /tmp/
+    - unzip -o /tmp/chromedriver_linux64.zip -d /usr/local/bin/
+    - chmod +x /usr/local/bin/chromedriver
+    # Проверка установки
+    - google-chrome --version
+    - chromedriver --version
+  artifacts:
+    paths:
+      - /usr/local/bin/chromedriver
+    expire_in: 1 hour
+
+# API тесты
 api_tests:
-  stage: test_api
-  image: python:3.11-slim
-  services:
-    - name: vabene1111/recipes:latest
-      alias: tandoor
+  stage: test
+  variables:
+    BASE_URL: $BASE_URL
+    TANDOOR_TOKEN: $TANDOOR_TOKEN
+    TANDOOR_USERNAME: $TANDOOR_USERNAME
+    TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   script:
-    - echo "🚀 Запуск API тестов..."
-    - pip install -r requirements.txt
-    - echo "BASE_URL = $BASE_URL"
+    - echo "Running API tests..."
+    - source venv/bin/activate
+    - python -m pytest tests/test_api_client.py -v --alluredir=allure-results
+    - python -m pytest tests/ -v -m api --alluredir=allure-results
+  artifacts:
+    when: always
+    paths:
+      - allure-results/
+    expire_in: 1 week
+  tags:
+    - api
 
-    # УВЕЛИЧИВАЕМ ВРЕМЯ ОЖИДАНИЯ - Tandoor долго запускается
-    - echo "⏳ Ожидаем полный запуск Tandoor (может занять до 3 минут)..."
-    - |
-      for i in {1..36}; do
-        if curl -s -f "http://tandoor:80/api/" > /dev/null 2>&1; then
-          echo "✅ Tandoor API полностью готов (попытка $i/36)"
-          break
-        elif [ $i -eq 36 ]; then
-          echo "❌ Tandoor API не запустился за 3 минуты"
-          echo "Проверяем что доступно:"
-          curl -I "http://tandoor:80/" || echo "Сервер не отвечает"
-          exit 1
-        else
-          echo "⏳ Ожидание... ($i/36) - 5 секунд"
-          sleep 5
-        fi
-      done
-
-    # Проверяем health endpoint
-    - echo "🔍 Проверяем health endpoint..."
-    - curl -s "http://tandoor:80/api/health/" | head -20 || echo "Health check не прошел"
-
-    - pytest tests/ -m api -v --alluredir=allure-results
-
+# UI тесты
 ui_tests:
-  stage: test_ui
-  image: python:3.11-slim
-  services:
-    - name: vabene1111/recipes:latest
-      alias: tandoor
-    - name: selenium/standalone-chrome:latest
-      alias: selenium  # Исправлено: должно совпадать с переменной
+  stage: test
+  variables:
+    BASE_URL: $BASE_URL
+    TANDOOR_TOKEN: $TANDOOR_TOKEN
+    TANDOOR_USERNAME: $TANDOOR_USERNAME
+    TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   script:
-    - echo "🚀 Запуск UI тестов..."
-    - pip install -r requirements.txt
-    - echo "BASE_URL = $BASE_URL"
-    - echo "SELENIUM_HOST = $SELENIUM_HOST"
+    - echo "Running UI tests..."
+    - source venv/bin/activate
+    # Установка переменных для headless режима
+    - export DISPLAY=:99.0
+    - Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+    - python -m pytest tests/ -v -m "not api" --alluredir=allure-results
+  artifacts:
+    when: always
+    paths:
+      - allure-results/
+      - screenshots/
+    expire_in: 1 week
+  dependencies:
+    - install_chrome
+  tags:
+    - ui
 
-    # Ждем запуск сервисов
-    - echo "⏳ Ожидаем сервисы..."
-    # Ждем Tandoor
-    - timeout 180 bash -c 'until curl -s -f http://tandoor:80/api/ > /dev/null; do sleep 10; echo "Ждем Tandoor..."; done'
-    # Ждем Selenium
-    - timeout 60 bash -c 'until curl -s -f http://selenium:4444/wd/hub/status > /dev/null; do sleep 5; echo "Ждем Selenium..."; done'
-
-    - pytest tests/ -m ui -v --alluredir=allure-results
-
-generate_report:
+# Генерация Allure отчетов
+generate_allure_report:
   stage: report
   image: frankescobar/allure-docker-service
   script:
-    - allure generate allure-results --clean -o public
+    - echo "Generating Allure report..."
+    - allure generate --clean allure-results -o public
   artifacts:
     paths:
       - public
+    expire_in: 30 days
+  dependencies:
+    - api_tests
+    - ui_tests
+  only:
+    - main
+    - master
+    - develop
+
+# Публикация отчетов на GitLab Pages
+pages:
+  stage: report
+  script:
+    - echo "Publishing Allure report to GitLab Pages..."
+    - mv public public_html
+  artifacts:
+    paths:
+      - public_html
+  dependencies:
+    - generate_allure_report
+  only:
+    - main
+    - master
+    - develop
