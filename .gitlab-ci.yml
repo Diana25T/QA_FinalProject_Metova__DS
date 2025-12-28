@@ -30,6 +30,9 @@ prepare:
 # ШАГ 2: API-ТЕСТЫ. Запускаем тесты с пометкой 'api'
 api_tests:
   stage: test_api
+  services:
+    - name: vabene1111/recipes:latest  # Запускает контейнер Tandoor
+      alias: tandoor
   before_script:
     - echo "BASE_URL = $BASE_URL"
     - echo "TANDOOR_TOKEN = $TANDOOR_TOKEN"
