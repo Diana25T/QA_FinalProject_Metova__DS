@@ -4,13 +4,6 @@ image: python:3.11
 variables:
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-
-cache:
-  paths:
-    - .cache/pip
-    - .wdm/
-  key: "${CI_COMMIT_REF_SLUG}"
 
 stages:
   - setup
@@ -18,28 +11,24 @@ stages:
   - report
   - deploy
 
-# 1. SETUP - Подготовка окружения
+# 1. SETUP
 setup-environment:
   stage: setup
   script:
     - echo "=== НАСТРОЙКА ОКРУЖЕНИЯ ==="
     - pip install --upgrade pip
     - pip install -r requirements.txt
-    - pip install allure-pytest pytest-html
     - apt-get update && apt-get install -y wget unzip
-    - echo "Окружение готово к тестированию!"
+    - echo "Окружение готово!"
 
 # 2. TEST - API тесты
 test-api:
   stage: test
   script:
-    - echo "=== ЗАПУСК API ТЕСТОВ ==="
-    - echo "Этот job запускает API тесты"
+    - echo "=== API ТЕСТЫ ==="
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
-    - echo "API тестирование завершено"
   artifacts:
-    when: always
     paths:
       - $ALLURE_RESULTS/
     expire_in: 1 week
@@ -48,33 +37,38 @@ test-api:
 test-ui:
   stage: test
   script:
-    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
-    - echo "Этот job запускает UI тесты с Selenium"
-    - echo "После установки зависимостей, запускаем UI тесты"
-    - pip install -r requirements.txt
-    - pip install webdriver-manager
-    - mkdir -p screenshots
+    - echo "=== UI ТЕСТЫ ==="
+    - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI тесты завершены"
-    - echo "UI тестирование завершено"
-    - echo "Этот job занимает больше времени из-за запуска браузера"
-    - sleep 5
   artifacts:
-    when: always
     paths:
       - $ALLURE_RESULTS/
-      - screenshots/
     expire_in: 1 week
 
-# 4. REPORT - Генерация Allure отчетов
+# 4. REPORT - Allure отчет (ИСПРАВЛЕНО: используем Java образ)
 generate-report:
   stage: report
+  image: openjdk:11-slim  # ← ВАЖНО: Java образ для Allure!
   script:
-    - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
-    - echo "Этот job генерирует отчеты из результатов тестов"
-    - pip install allure-pytest
+    - echo "=== ALLURE ОТЧЕТ ==="
+
+    # Устанавливаем Allure CLI
+    - apt-get update && apt-get install -y wget unzip
+
+    # Скачиваем и устанавливаем Allure
+    - wget https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
+    - unzip allure-2.29.0.zip -d /opt/
+    - ln -s /opt/allure-2.29.0/bin/allure /usr/bin/allure
+
+    # Проверяем установку
+    - allure --version
+
+    # Генерируем отчет
     - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
-    - echo "Отчет сгенерирован в папке $ALLURE_REPORT"
+
+    - echo "✅ Allure отчет создан"
     - ls -la $ALLURE_REPORT/
+
   artifacts:
     paths:
       - $ALLURE_REPORT/
@@ -82,11 +76,17 @@ generate-report:
   only:
     - main
 
-# 5. DEPLOY - Публикация отчетов на GitLab Pages
-deploy-pages:
+# 5. DEPLOY - GitLab Pages
+pages:
   stage: deploy
   script:
-    - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ ==="
-    - echo "Этот job публикует отчеты на GitLab Pages из ветки $CI_COMMIT_BRANCH"
-    - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Создаем public директорию"
+    - echo "=== ПУБЛИКАЦИЯ ==="
     - mkdir -p public
+    - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Копирование отчета"
+    - echo '<html><head><meta http-equiv="refresh" content="0; url=index.html"></head><body><h1>Allure Report</h1><p>Redirecting...</p></body></html>' > public/index.html
+    - echo "✅ Отчет опубликован!"
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
