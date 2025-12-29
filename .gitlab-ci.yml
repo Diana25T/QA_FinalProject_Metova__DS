@@ -1,30 +1,168 @@
 # .gitlab-ci.yml
 image: python:3.11
 
-services:
-  - postgres:16-alpine
-
 variables:
-  POSTGRES_DB: test_djangodb
-  POSTGRES_USER: test_djangodb
-  POSTGRES_PASSWORD: test_password123
+  # Для Allure отчетов
+  ALLURE_RESULTS: "allure-results"
+  ALLURE_REPORT: "public"
 
-test:
-  stage: test
-  before_script:
-    # Устанавливаем psql
-    - apt-get update && apt-get install -y postgresql-client
-    - pip install -r requirements.txt
-    - sleep 10  # ждем БД
+  # Если нужно тестовое окружение
+  # BASE_URL: "http://test-server:80"
 
+  # Кеширование
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  VENV_PATH: "$CI_PROJECT_DIR/venv"
+
+# Кеширование зависимостей
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+  key: "${CI_COMMIT_REF_SLUG}-python"
+
+stages:
+  - setup
+  - test
+  - report
+  - deploy
+
+# 1. ПОДГОТОВКА ОКРУЖЕНИЯ
+setup_environment:
+  stage: setup
   script:
-    # Просто запускаем тесты без лишних команд
-    - echo "Запуск тестов..."
-    - python -m pytest tests/ -v
+    - echo "=== НАСТРОЙКА ОКРУЖЕНИЯ ==="
+
+    # Создаем виртуальное окружение
+    - python -m venv $VENV_PATH
+    - source $VENV_PATH/bin/activate
+
+    # Обновляем pip
+    - pip install --upgrade pip
+
+    # Устанавливаем зависимости
+    - pip install -r requirements.txt
+
+    # Устанавливаем Allure CLI (если нужно генерировать отчеты)
+    - pip install allure-pytest
+
+    # Для UI тестов может потребоваться Chrome
+    - apt-get update && apt-get install -y wget unzip
+
+    - echo "Окружение настроено!"
+
+  artifacts:
+    paths:
+      - venv/
+      - .cache/pip
+    expire_in: 1 hour
+
+# 2. API ТЕСТЫ
+api_tests:
+  stage: test
+  script:
+    - echo "=== ЗАПУСК API ТЕСТОВ ==="
+
+    # Активируем виртуальное окружение
+    - source $VENV_PATH/bin/activate
+
+    # Создаем директорию для результатов Allure
+    - mkdir -p $ALLURE_RESULTS
+
+    # Запускаем API тесты с тегом @api
+    # Используем pytest маркировку, если тесты помечены @pytest.mark.api
+    - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS
+
+    # Или запускаем конкретные файлы с API тестами
+    # - python -m pytest tests/test_api_client.py tests/test_meal_plan.py -v --alluredir=$ALLURE_RESULTS
 
   artifacts:
     when: always
     paths:
-      - allure-results/
+      - $ALLURE_RESULTS/
+    reports:
+      junit: reports/junit.xml
+    expire_in: 1 week
+
+# 3. UI ТЕСТЫ (с Selenium)
+ui_tests:
+  stage: test
+  # Используем образ с Selenium для UI тестов
+  image: selenium/standalone-chrome:latest
+  services:
+    - selenium/standalone-chrome:latest
+  variables:
+    SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"
+  script:
+    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
+
+    # Устанавливаем Python в контейнере Selenium
+    - apt-get update
+    - apt-get install -y python3 python3-pip python3-venv
+
+    # Создаем виртуальное окружение
+    - python3 -m venv /venv
+    - source /venv/bin/activate
+
+    # Устанавливаем зависимости
+    - pip install -r requirements.txt
+
+    # Создаем директорию для результатов
+    - mkdir -p $ALLURE_RESULTS
+    - mkdir -p screenshots
+
+    # Запускаем UI тесты
+    # Для Selenium указываем remote URL
+    - SELENIUM_REMOTE_URL=$SELENIUM_REMOTE_URL python3 -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS
+
+    # Или запускаем конкретные UI тесты
+    # - SELENIUM_REMOTE_URL=$SELENIUM_REMOTE_URL python3 -m pytest tests/test_ui.py tests/test_login_page.py -v --alluredir=$ALLURE_RESULTS
+
+    - echo "UI тесты завершены"
+
+  artifacts:
+    when: always
+    paths:
+      - $ALLURE_RESULTS/
       - screenshots/
     expire_in: 1 week
+
+# 4. ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ
+generate_allure_report:
+  stage: report
+  image: python:3.11
+  script:
+    - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
+
+    # Устанавливаем Allure CLI
+    - pip install allure-pytest
+
+    # Создаем публичную директорию для GitLab Pages
+    - mkdir -p $ALLURE_REPORT
+
+    # Генерируем отчет из результатов тестов
+    - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
+
+    # Проверяем что отчет создан
+    - ls -la $ALLURE_REPORT/
+
+    - echo "Allure отчет сгенерирован в папке $ALLURE_REPORT"
+
+  artifacts:
+    paths:
+      - $ALLURE_REPORT/
+    expire_in: 30 days
+  # Только для main ветки
+  only:
+    - main
+
+# 5. ПУБЛИКАЦИЯ ОТЧЕТОВ НА GITLAB PAGES
+pages:
+  stage: deploy
+  script:
+    - echo "=== ПУБЛИКАЦИЯ НА GITLAB PAGES ==="
+    - echo "Отчеты доступны по адресу: https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME/"
+
+    # Копируем Allure отчет в публичную директорию
+    - mv $ALLURE_REPORT public/
+
+
