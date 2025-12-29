@@ -23,19 +23,10 @@ setup-environment:
   stage: setup
   script:
     - echo "=== НАСТРОЙКА ОКРУЖЕНИЯ ==="
-    - echo "Пользователь: $GITLAB_USER_LOGIN"
-    - echo "Ветка: $CI_COMMIT_BRANCH"
-
-    # Установка зависимостей
     - pip install --upgrade pip
     - pip install -r requirements.txt
-
-    # Установка дополнительных пакетов для тестов
     - pip install allure-pytest pytest-html
-
-    # Для UI тестов установим системные зависимости
     - apt-get update && apt-get install -y wget unzip
-
     - echo "Окружение готово к тестированию!"
 
 # 2. TEST - API тесты
@@ -44,51 +35,29 @@ test-api:
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
-
-    # Проверяем наличие директории для результатов
     - mkdir -p $ALLURE_RESULTS
-
-    # Запускаем API тесты (помеченные как @pytest.mark.api)
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
-
-    # Или конкретные файлы
-    # - python -m pytest tests/test_api_client.py tests/test_meal_plan.py -v --alluredir=$ALLURE_RESULTS
-
     - echo "API тестирование завершено"
-
   artifacts:
     when: always
     paths:
       - $ALLURE_RESULTS/
     expire_in: 1 week
 
-# 3. TEST - UI тесты (отдельный job для параллельного запуска)
+# 3. TEST - UI тесты
 test-ui:
   stage: test
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Этот job запускает UI тесты с Selenium"
     - echo "После установки зависимостей, запускаем UI тесты"
-
-    # Устанавливаем зависимости
     - pip install -r requirements.txt
-
-    # Устанавливаем Chrome драйвер через webdriver-manager
     - pip install webdriver-manager
-
-    # Создаем директорию для скриншотов
     - mkdir -p screenshots
-
-    # Запускаем UI тесты (помеченные как @pytest.mark.ui)
     - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI тесты завершены"
-
-    # Или конкретные файлы
-    # - python -m pytest tests/test_ui.py tests/test_login_page.py -v --alluredir=$ALLURE_RESULTS
-
     - echo "UI тестирование завершено"
     - echo "Этот job занимает больше времени из-за запуска браузера"
-    - sleep 5  # имитация дополнительного времени
-
+    - sleep 5
   artifacts:
     when: always
     paths:
@@ -102,21 +71,14 @@ generate-report:
   script:
     - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
     - echo "Этот job генерирует отчеты из результатов тестов"
-
-    # Устанавливаем Allure
     - pip install allure-pytest
-
-    # Генерируем отчет
     - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
-
     - echo "Отчет сгенерирован в папке $ALLURE_REPORT"
     - ls -la $ALLURE_REPORT/
-
   artifacts:
     paths:
       - $ALLURE_REPORT/
     expire_in: 30 days
-  # Только для main ветки
   only:
     - main
 
@@ -126,7 +88,5 @@ deploy-pages:
   script:
     - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ ==="
     - echo "Этот job публикует отчеты на GitLab Pages из ветки $CI_COMMIT_BRANCH"
-
-    # Копируем отчет в public директорию
     - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Создаем public директорию"
     - mkdir -p public
