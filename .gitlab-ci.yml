@@ -7,32 +7,24 @@ services:
 variables:
   POSTGRES_DB: test_djangodb
   POSTGRES_USER: test_djangodb
-  POSTGRES_PASSWORD: e9ttfeAVvQQIWmXPsXhp8xXUcG0
-  DJANGO_SETTINGS_MODULE: recipes.settings
+  POSTGRES_PASSWORD: test_password123
 
-stages:
-  - test
-
-test_all:
+test:
   stage: test
   before_script:
+    # Устанавливаем psql
+    - apt-get update && apt-get install -y postgresql-client
     - pip install -r requirements.txt
-    - pip install pytest
-    # Ждем БД
-    - sleep 10
+    - sleep 10  # ждем БД
+
   script:
-    # Настраиваем БД
-    - PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -c "CREATE DATABASE $POSTGRES_DB;" || true
-
-    # Применяем миграции
-    - echo "Применяем миграции..."
-    - python manage.py migrate --noinput
-
-    # Запускаем ВСЕ тесты
-    - echo "=== ЗАПУСК ВСЕХ ТЕСТОВ ==="
+    # Просто запускаем тесты без лишних команд
+    - echo "Запуск тестов..."
     - python -m pytest tests/ -v
+
   artifacts:
     when: always
     paths:
-      - test-results/
+      - allure-results/
+      - screenshots/
     expire_in: 1 week
