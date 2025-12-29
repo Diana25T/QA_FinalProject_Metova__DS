@@ -45,10 +45,10 @@ test-ui:
       - $ALLURE_RESULTS/
     expire_in: 1 week
 
-# 4. REPORT - Allure отчет (ИСПРАВЛЕНО: используем Java образ)
+# 4. REPORT - Allure отчет (используем Java образ)
 generate-report:
   stage: report
-  image: openjdk:11-slim  # ← ВАЖНО: Java образ для Allure!
+  image: openjdk:11-jre-slim
   script:
     - echo "=== ALLURE ОТЧЕТ ==="
 
@@ -66,7 +66,7 @@ generate-report:
     # Генерируем отчет
     - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
 
-    - echo "✅ Allure отчет создан"
+    - echo " Allure отчет создан"
     - ls -la $ALLURE_REPORT/
 
   artifacts:
@@ -84,7 +84,7 @@ pages:
     - mkdir -p public
     - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Копирование отчета"
     - echo '<html><head><meta http-equiv="refresh" content="0; url=index.html"></head><body><h1>Allure Report</h1><p>Redirecting...</p></body></html>' > public/index.html
-    - echo "✅ Отчет опубликован!"
+    - echo " Отчет опубликован!"
   artifacts:
     paths:
       - public
