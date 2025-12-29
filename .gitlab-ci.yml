@@ -1,125 +1,38 @@
-stages:
-  - setup
-  - api_test
-  - ui_test
-  - report
-  - deploy
+# .gitlab-ci.yml
+image: python:3.11
+
+services:
+  - postgres:16-alpine
 
 variables:
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  PYTHON_VERSION: "3.10"
+  POSTGRES_DB: test_djangodb
+  POSTGRES_USER: test_djangodb
+  POSTGRES_PASSWORD: e9ttfeAVvQQIWmXPsXhp8xXUcG0
+  DJANGO_SETTINGS_MODULE: recipes.settings
 
-cache:
-  paths:
-    - .cache/pip
-    - venv/
-  key: "${CI_COMMIT_REF_SLUG}"
+stages:
+  - test
 
-# Установка зависимостей
-setup:
-  stage: setup
-  image: python:$PYTHON_VERSION
-  script:
-    - python --version
-    - pip --version
-    - pip install virtualenv
-    - virtualenv venv
-    - source venv/bin/activate
-    - pip install --upgrade pip
+test_all:
+  stage: test
+  before_script:
     - pip install -r requirements.txt
-  artifacts:
-    paths:
-      - venv/
-    expire_in: 1 hour
-
-# API тесты
-api_test:
-  stage: api_test
-  image: python:$PYTHON_VERSION
-  needs: ["setup"]
-  variables:
-    BASE_URL: $BASE_URL
-    TANDOOR_TOKEN: $TANDOOR_TOKEN
-    TANDOOR_USERNAME: $TANDOOR_USERNAME
-    TANDOOR_PASSWORD: $TANDOOR_PASSWORD
-  before_script:
-    - source venv/bin/activate
+    - pip install pytest
+    # Ждем БД
+    - sleep 10
   script:
-    - echo "Running API tests..."
-    - python -m pytest tests/ -v -m api --alluredir=allure-results
+    # Настраиваем БД
+    - PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -c "CREATE DATABASE $POSTGRES_DB;" || true
+
+    # Применяем миграции
+    - echo "Применяем миграции..."
+    - python manage.py migrate --noinput
+
+    # Запускаем ВСЕ тесты
+    - echo "=== ЗАПУСК ВСЕХ ТЕСТОВ ==="
+    - python -m pytest tests/ -v
   artifacts:
     when: always
     paths:
-      - allure-results/
-    reports:
-      junit: junit-report.xml
+      - test-results/
     expire_in: 1 week
-
-# UI тесты
-ui_test:
-  stage: ui_test
-  image: python:$PYTHON_VERSION
-  needs: ["setup"]
-  variables:
-    BASE_URL: $BASE_URL
-    TANDOOR_TOKEN: $TANDOOR_TOKEN
-    TANDOOR_USERNAME: $TANDOOR_USERNAME
-    TANDOOR_PASSWORD: $TANDOOR_PASSWORD
-  before_script:
-    - source venv/bin/activate
-    # Установка Chrome
-    - apt-get update
-    - apt-get install -y wget unzip gnupg
-    - wget -q -O /usr/share/keyrings/google-chrome-keyring.gpg https://dl.google.com/linux/linux_signing_key.pub
-    - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
-    - apt-get update
-    - apt-get install -y google-chrome-stable
-    # Установка зависимостей для UI
-    - pip install webdriver-manager
-  script:
-    - echo "Running UI tests..."
-    - echo "Chrome version: $(google-chrome --version)"
-    - python -m pytest tests/ -v -m "not api" --alluredir=allure-results
-  artifacts:
-    when: always
-    paths:
-      - allure-results/
-      - screenshots/
-    expire_in: 1 week
-
-# Генерация Allure отчета
-generate_report:
-  stage: report
-  image: python:$PYTHON_VERSION
-  needs:
-    - job: api_test
-      artifacts: true
-    - job: ui_test
-      artifacts: true
-  before_script:
-    - pip install allure-pytest allure-python-commons
-  script:
-    - echo "Generating Allure report..."
-    - allure generate --clean allure-results -o public
-  artifacts:
-    paths:
-      - public
-    expire_in: 30 days
-  only:
-    - main
-    - master
-
-# Публикация на GitLab Pages
-pages:
-  stage: deploy
-  image: alpine:latest
-  needs: ["generate_report"]
-  script:
-    - echo "Publishing to GitLab Pages..."
-    - mv public public_html
-  artifacts:
-    paths:
-      - public_html
-  only:
-    - main
-    - master
