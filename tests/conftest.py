@@ -3,6 +3,7 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta
+from selenium.webdriver.chrome.options import Options
 
 import allure
 import pytest
@@ -431,7 +432,6 @@ def driver():
     """Фикстура браузера с автоматическим скачиванием драйвера"""
 
     # Создаем опции для Chrome
-    from selenium.webdriver.chrome.options import Options
     chrome_options = Options()
 
     # Если запущено в CI, используем headless режим
