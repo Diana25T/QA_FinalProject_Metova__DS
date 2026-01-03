@@ -1,5 +1,5 @@
 # .gitlab-ci.yml
-image: python:3.11
+image: python:3.11-slim  # ЛУЧШЕ ИСПОЛЬЗОВАТЬ SLIM
 
 variables:
   ALLURE_RESULTS: "allure-results"
@@ -8,9 +8,8 @@ variables:
 
 cache:
   paths:
-    - .cache/pip # ← Кэшируем папку с pip пакетами
-    - .wdm/   # ← Кэш WebDriver Manager
-    - .venv/
+    - .cache/pip
+    - .wdm/
   key: "${CI_COMMIT_REF_SLUG}"
   policy: pull-push
 
@@ -35,33 +34,24 @@ setup-environment:
     - pip list | grep -E "pytest|allure|requests"
     - echo "Окружение готово к тестированию!"
   cache:
-      paths:
-        - .cache/pip
-        - .venv/  # Сохраняем venv для следующих stages
-      expire_in: 1 week
-      policy: push
+    paths:
+      - .cache/pip
+    policy: push
 
-# 2. TEST - API тесты
+# 2. TEST - API тесты (ИСПРАВЛЕНО: убрал лишние кавычки)
 test-api:
   stage: test
-  needs:
-  - job: "setup-environment"
+  needs: ["setup-environment"]  # ИСПРАВЛЕНО
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
-    # Показываем, что в кэше
-    - echo "Проверка кэша pip:"
-    - ls -la $PIP_CACHE_DIR/wheels/ 2>/dev/null | head -5 || echo "Кэш wheels пуст"
-      # Устанавливаем пакеты ИЗ КЭША
+
+    # Устанавливаем пакеты ИЗ КЭША
     - echo "Установка из кэша..."
     - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
 
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
-    - echo "Содержимое allure-results:"
-    - ls -la $ALLURE_RESULTS/
-    - echo "Количество файлов:"
-    - find $ALLURE_RESULTS/ -type f | wc -l
     - echo "API тестирование завершено"
   artifacts:
     when: always
@@ -69,30 +59,39 @@ test-api:
       - $ALLURE_RESULTS/
     expire_in: 1 week
 
-# 3. TEST - UI тесты
+# 3. TEST - UI тесты (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 test-ui:
   stage: test
-  needs:
-  - job: setup-environment
-    artifacts: true
+  needs: ["setup-environment"]  # ИСПРАВЛЕНО: убрал artifacts: true
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Этот job запускает UI тесты с Selenium"
+
     # Устанавливаем Chrome
     - echo "Устанавливаем Chrome..."
     - apt-get update
     - apt-get install -y wget gnupg
-    - wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
     - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-    - apt-get update
+    - apt-get update  # ДОБАВИТЬ ЭТУ СТРОКУ!
     - apt-get install -y google-chrome-stable
+
+    # Проверяем Chrome
+    - echo "Chrome версия: $(google-chrome --version)"
+
+    # Очищаем кэш webdriver-manager
+    - rm -rf /root/.wdm 2>/dev/null || true
+
     - echo "После установки зависимостей, запускаем UI тесты"
     - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
-    - pip install webdriver-manager
+    - pip install webdriver-manager  # ДОБАВИТЬ!
+
     - mkdir -p screenshots
-    - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI тесты завершены"
+    - mkdir -p $ALLURE_RESULTS
+
+    # Запускаем тесты
+    - CI=true python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI тесты завершены"
     - echo "UI тестирование завершено"
-    - echo "Этот job занимает больше времени из-за запуска браузера"
   artifacts:
     when: always
     paths:
@@ -137,9 +136,9 @@ pages:
     - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ НА GITLAB PAGES ==="
     - mkdir -p public
     - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Копирование отчетов"
-    - echo " Отчеты готовы для GitLab Pages"
+    - echo "Отчеты готовы для GitLab Pages"
   artifacts:
     paths:
       - public
   only:
-  - main
+    - main
