@@ -55,8 +55,8 @@ test-api:
     - echo "Проверка кэша pip:"
     - ls -la $PIP_CACHE_DIR/wheels/ 2>/dev/null | head -5 || echo "Кэш wheels пуст"
       # Устанавливаем пакеты ИЗ КЭША
-      - echo "Установка из кэша..."
-      - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
+    - echo "Установка из кэша..."
+    - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
 
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
@@ -132,7 +132,7 @@ pages:
     - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ НА GITLAB PAGES ==="
     - mkdir -p public
     - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Копирование отчетов"
-    - echo "✅ Отчеты готовы для GitLab Pages"
+    - echo " Отчеты готовы для GitLab Pages"
   artifacts:
     paths:
       - public
