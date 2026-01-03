@@ -2,7 +2,7 @@
 image: python:3.11
 
 variables:
-  BASE_URL: "http://localhost:8000"  # ИЛИ ВАШ РЕАЛЬНЫЙ URL
+  BASE_URL: "https://app.tandoor.dev/"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -35,6 +35,8 @@ setup-environment:
 test-api:
   stage: test
   needs: ["setup-environment"]
+  variables:
+    BASE_URL: "$BASE_URL"
   script:
     - source .venv/bin/activate
     - mkdir -p $ALLURE_RESULTS
@@ -47,6 +49,8 @@ test-api:
 test-ui:
   stage: test
   needs: ["setup-environment"]
+  variables:
+    BASE_URL: "$BASE_URL"
   before_script:
     - source .venv/bin/activate
   script:
@@ -57,26 +61,15 @@ test-ui:
     - apt-get update
 
     # Устанавливаем необходимые пакеты
+    - apt-get update
     - apt-get install -y wget
 
     # Скачиваем ключ Google Chrome
-    - mkdir -p /etc/apt/keyrings
-    - wget -q -O /etc/apt/keyrings/google-chrome.asc https://dl.google.com/linux/linux_signing_key.pub
-
-    # Добавляем репозиторий Chrome
-    - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
-
-    # Обновляем и устанавливаем
-    - apt-get update
-    - apt-get install -y google-chrome-stable
-
-    # Проверяем установку
-    - echo "Chrome version: $(google-chrome --version || echo 'Not installed')"
-
-    # Устанавливаем webdriver-manager
-    - pip install webdriver-manager
-
-    # Создаем директории
+    - wget -q -O google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    - apt-get install -y ./google-chrome.deb
+    - echo "Chrome version:"
+    - google-chrome --version || echo "Chrome не установлен"
+    - pip install webdriver-manager selenium
     - mkdir -p screenshots
     - mkdir -p $ALLURE_RESULTS
 
