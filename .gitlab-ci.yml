@@ -2,8 +2,8 @@
 image: python:3.11
 
 variables:
-  BASE_URL: "$BASE_URL"
-  API_TOKEN: "$TANDOOR_TOKEN"
+  BASE_URL: "${BASE_URL}"
+  API_TOKEN: "{$TANDOOR_TOKEN}"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
