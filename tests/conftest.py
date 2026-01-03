@@ -427,48 +427,42 @@ def cleanup_test_data(api_client):
 
 # ======================== ФИКСТУРЫ UI ========================
 
-
 @pytest.fixture(scope="function")
 def driver():
-    """Фикстура браузера с автоматическим скачиванием драйвера"""
+    """ИСПРАВЛЕННАЯ фикстура для CI"""
 
-    # Создаем опции для Chrome
     chrome_options = Options()
 
-    # Добавляем стандартные опции
+    # ОБЯЗАТЕЛЬНЫЕ опции для CI:
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--headless')
     chrome_options.add_argument('--window-size=1920,1080')
-    chrome_options.add_argument('--disable-notifications')
-    chrome_options.add_argument('--disable-infobars')
-    chrome_options.add_argument('--disable-gpu')  # Для стабильности
+    chrome_options.add_argument('--disable-gpu')
 
-    # Если запущено в CI, используем headless режим
+    # В CI используем системный Chrome
     if os.getenv('CI') or os.getenv('GITLAB_CI'):
-        chrome_options.add_argument('--headless=new')  # Новый headless режим
-        chrome_options.add_argument('--no-sandbox')  # ОБЯЗАТЕЛЬНО для CI
-        chrome_options.add_argument('--disable-dev-shm-usage')  # ОБЯЗАТЕЛЬНО для CI
-        chrome_options.add_argument('--remote-debugging-port=9222')  # Для отладки
-
-        # В CI указываем явно путь к Chrome
         chrome_options.binary_location = '/usr/bin/google-chrome'
 
-        # Для webdriver-manager в CI
-        os.environ['WDM_LOG_LEVEL'] = '0'  # Отключаем логи
-        os.environ['WDM_LOCAL'] = '1'  # Используем локальную установку
+        # В CI Chrome уже включает chromedriver, используем без Service
+        driver = webdriver.Chrome(options=chrome_options)  # ← БЕЗ Service!
+    else:
+        # Локально используем webdriver-manager
+        from selenium.webdriver.chrome.service import Service
+        from webdriver_manager.chrome import ChromeDriverManager
 
-    # Создаем сервис с ChromeDriver
-    service = Service(ChromeDriverManager().install())
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
 
-    # Создаем драйвер
-    driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.implicitly_wait(10)
 
-    # Переходим на базовый URL
-    base_url = os.getenv('BASE_URL', 'http://localhost:8000')  # Значение по умолчанию
+    # URL из переменных окружения
+    base_url = os.getenv('BASE_URL', 'http://localhost:8000')
+    print(f"Opening: {base_url}")
     driver.get(base_url)
 
     yield driver
 
-    # Закрываем драйвер
     driver.quit()
 
 @pytest.fixture
