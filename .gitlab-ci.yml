@@ -10,6 +10,7 @@ cache:
   paths:
     - .cache/pip # ← Кэшируем папку с pip пакетами
     - .wdm/   # ← Кэш WebDriver Manager
+    - .venv/
   key: "${CI_COMMIT_REF_SLUG}"
   policy: pull-push
 
@@ -36,6 +37,8 @@ setup-environment:
   cache:
       paths:
         - .cache/pip
+        - .venv/  # Сохраняем venv для следующих stages
+      expire_in: 1 week
       policy: push
 
 # 2. TEST - API тесты
@@ -43,7 +46,6 @@ test-api:
   stage: test
   needs:
   - job: "setup-environment"
-    artifacts: true
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
@@ -76,14 +78,21 @@ test-ui:
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Этот job запускает UI тесты с Selenium"
+    # Устанавливаем Chrome
+    - echo "Устанавливаем Chrome..."
+    - apt-get update
+    - apt-get install -y wget gnupg
+    - wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+    - apt-get update
+    - apt-get install -y google-chrome-stable
     - echo "После установки зависимостей, запускаем UI тесты"
-    - pip install -r requirements.txt
+    - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
     - pip install webdriver-manager
     - mkdir -p screenshots
     - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI тесты завершены"
     - echo "UI тестирование завершено"
     - echo "Этот job занимает больше времени из-за запуска браузера"
-    - sleep 5
   artifacts:
     when: always
     paths:
@@ -132,3 +141,5 @@ pages:
   artifacts:
     paths:
       - public
+  only:
+  - main
