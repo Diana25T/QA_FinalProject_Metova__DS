@@ -35,6 +35,10 @@ test-api:
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
+    - echo "Содержимое allure-results:"
+    - ls -la $ALLURE_RESULTS/
+    - echo "Количество файлов:"
+    - find $ALLURE_RESULTS/ -type f | wc -l
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
     - echo "API тестирование завершено"
