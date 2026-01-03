@@ -3,7 +3,7 @@ image: python:3.11
 
 variables:
   BASE_URL: "${BASE_URL}"
-  API_TOKEN: "{$TANDOOR_TOKEN}"
+  TANDOOR_TOKEN: "${TANDOOR_TOKEN}"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -21,17 +21,33 @@ stages:
   - report
   - deploy
 
+# ВАЖНО: Добавляем сервисы, как в вашем docker-compose
+services:
+  - name: postgres:16-alpine
+    alias: db_recipes  # совпадает с docker-compose
+  - name: vabene1111/recipes
+    alias: web_recipes  # совпадает с docker-compose
+
 setup-environment:
   stage: setup
+  variables:
+    POSTGRES_DB: "djangodb"
+    POSTGRES_USER: "djangodb"
+    POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
   script:
     - echo "=== ПОДГОТОВКА ОКРУЖЕНИЯ ==="
-    - echo "BASE_URL:$BASE_URL"
-    - echo "API_TOKEN доступен:${API_TOKEN:0:10}..."
+    - echo "BASE_URL:${BASE_URL}"
+    - echo "TANDOOR_TOKEN доступен:${TANDOOR_TOKEN:0:10}..."
+
+    # Ждем запуска сервисов
+    - echo "Ожидание запуска сервисов..."
+    - timeout 180 bash -c 'until curl -s http://web_recipes:80 >/dev/null; do echo "Ждем web_recipes..."; sleep 5; done'
+
     - python -m venv .venv
     - source .venv/bin/activate
     - pip install --upgrade pip
     - pip install -r requirements.txt
-    - pip install allure-pytest pytest
+    - pip install allure-pytest pytest requests selenium
   artifacts:
     paths:
       - .venv/
@@ -40,13 +56,21 @@ setup-environment:
 test-api:
   stage: test
   needs: ["setup-environment"]
+  variables:
+    BASE_URL: "http://web_recipes:80"
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
-    - echo "Используем токен:${API_TOKEN:0:10}..."
+    - echo "Используем BASE_URL:{$BASE_URL}"
     - source .venv/bin/activate
+
+    # Проверяем доступность приложения
+    - echo "Проверка доступности приложения..."
+    - curl -f http://web_recipes:80 || echo "Приложение не доступно, но продолжаем..."
+
     - mkdir -p $ALLURE_RESULTS
-    - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS
+    - pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS
   artifacts:
+    when: always
     paths:
       - $ALLURE_RESULTS/
     expire_in: 1 week
@@ -54,30 +78,35 @@ test-api:
 test-ui:
   stage: test
   needs: ["setup-environment"]
+  services:
+    - name: postgres:16-alpine
+      alias: db_recipes
+    - name: vabene1111/recipes
+      alias: web_recipes
+    - name: selenium/standalone-chrome:latest
+      alias: selenium
+  variables:
+    BASE_URL: "http://web_recipes:80"
+    SELENIUM_URL: "http://selenium:4444/wd/hub"
   before_script:
     - source .venv/bin/activate
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
+    - echo "SELENIUM_URL:$SELENIUM_URL"
+    - echo "BASE_URL:$BASE_URL"
 
-    # УСТАНАВЛИВАЕМ CHROME БЕЗ apt-key
-    - echo "Устанавливаем Chrome..."
-    - apt-get update
+    # Ожидаем запуск всех сервисов
+    - echo "Ожидание Selenium..."
+    - timeout 120 bash -c 'until curl -s $SELENIUM_URL >/dev/null; do echo "Ждем Selenium..."; sleep 3; done'
 
-    # Устанавливаем необходимые пакеты
-    - apt-get update
-    - apt-get install -y wget
+    - echo "Ожидание приложения..."
+    - timeout 120 bash -c 'until curl -s $BASE_URL >/dev/null; do echo "Ждем приложение..."; sleep 3; done'
 
-    # Скачиваем ключ Google Chrome
-    - wget -q -O google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    - apt-get install -y ./google-chrome.deb
-    - echo "Chrome version:"
-    - google-chrome --version || echo "Chrome не установлен"
-    - pip install webdriver-manager selenium
     - mkdir -p screenshots
     - mkdir -p $ALLURE_RESULTS
 
     # Запускаем UI тесты
-    - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS
+    - pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS
 
     - echo "UI тестирование завершено"
   artifacts:
@@ -92,11 +121,14 @@ generate-report:
   needs: ["test-api", "test-ui"]
   script:
     - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
-    - apt-get update
-    - apt-get install -y default-jre-headless wget unzip
-    - wget https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
-    - unzip allure-2.29.0.zip -d /opt/
-    - ln -s /opt/allure-2.29.0/bin/allure /usr/bin/allure
+    - apt-get update && apt-get install -y default-jre-headless wget unzip
+
+    # Скачиваем и устанавливаем Allure
+    - wget -q https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
+    - unzip -q allure-2.29.0.zip -d /opt/
+    - ln -sf /opt/allure-2.29.0/bin/allure /usr/local/bin/allure
+
+    # Генерируем отчет
     - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
   artifacts:
     paths:
@@ -108,8 +140,9 @@ pages:
   stage: deploy
   needs: ["generate-report"]
   script:
+    - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ ==="
     - mkdir -p public
-    - cp -r $ALLURE_REPORT/* public/
+    - if [ -d "$ALLURE_REPORT" ]; then cp -r $ALLURE_REPORT/* public/; else echo "Отчет не найден"; fi
   artifacts:
     paths:
       - public
