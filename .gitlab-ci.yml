@@ -2,7 +2,7 @@
 image: python:3.11
 
 variables:
-  BASE_URL: "$BASE_URL"
+  BASE_URL: "$ BASE_URL"
   API_TOKEN: "$API_TOKEN"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
