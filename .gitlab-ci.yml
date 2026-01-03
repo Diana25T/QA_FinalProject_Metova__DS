@@ -8,9 +8,10 @@ variables:
 
 cache:
   paths:
-    - .cache/pip
-    - .wdm/
+    - .cache/pip # ← Кэшируем папку с pip пакетами
+    - .wdm/   # ← Кэш WebDriver Manager
   key: "${CI_COMMIT_REF_SLUG}"
+  policy: pull-push
 
 stages:
   - setup
@@ -23,20 +24,40 @@ setup-environment:
   stage: setup
   script:
     - echo "=== НАСТРОЙКА ОКРУЖЕНИЯ ==="
+    # Показываем пути
+    - echo "PIP_CACHE_DIR: $PIP_CACHE_DIR"
+    - echo "Проект: $CI_PROJECT_DIR"
+    # Создаем папку для кэша
+    - mkdir -p $PIP_CACHE_DIR
     - pip install --upgrade pip
-    - pip install -r requirements.txt
+    - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
+    - echo " Зависимости установлены и закэшированы в $PIP_CACHE_DIR"
     - pip install allure-pytest pytest requests
-    - pip install allure-pytest pytest-html
+    - pip install --cache-dir $PIP_CACHE_DIR allure-pytest pytest-html
     - apt-get update && apt-get install -y wget unzip
+    - pip list | grep -E "pytest|allure|requests"
     - echo "Окружение готово к тестированию!"
+  cache:
+      paths:
+        - .cache/pip
+      policy: push
 
 # 2. TEST - API тесты
 test-api:
   stage: test
-  needs: ["setup-environment"]
+  needs:
+  - job: "setup-environment"
+    artifacts: true
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
+    # Показываем, что в кэше
+    - echo "Проверка кэша pip:"
+    - ls -la $PIP_CACHE_DIR/wheels/ 2>/dev/null | head -5 || echo "Кэш wheels пуст"
+      # Устанавливаем пакеты ИЗ КЭША
+      - echo "Установка из кэша..."
+      - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
+
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
     - echo "Содержимое allure-results:"
@@ -53,7 +74,9 @@ test-api:
 # 3. TEST - UI тесты
 test-ui:
   stage: test
-  needs: ["setup-environment"]
+  needs:
+  - job: setup-environment
+    artifacts: true
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Этот job запускает UI тесты с Selenium"
@@ -102,10 +125,14 @@ generate-report:
     - main
 
 # 5. DEPLOY - Публикация отчетов на GitLab Pages
-deploy-pages:
+pages:
   stage: deploy
+  needs: ["generate-report"]
   script:
-    - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ ==="
-    - echo "Этот job публикует отчеты на GitLab Pages из ветки $CI_COMMIT_BRANCH"
-    - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Создаем public директорию"
+    - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ НА GITLAB PAGES ==="
     - mkdir -p public
+    - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Копирование отчетов"
+    - echo "✅ Отчеты готовы для GitLab Pages"
+  artifacts:
+    paths:
+      - public
