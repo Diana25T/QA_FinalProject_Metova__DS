@@ -33,6 +33,7 @@ setup-environment:
 # 2. TEST - API тесты
 test-api:
   stage: test
+  needs: ["setup-environment"]
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
@@ -52,6 +53,7 @@ test-api:
 # 3. TEST - UI тесты
 test-ui:
   stage: test
+  needs: ["setup-environment"]
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Этот job запускает UI тесты с Selenium"
@@ -73,6 +75,7 @@ test-ui:
 # 4. REPORT - Генерация Allure отчетов
 generate-report:
   stage: report
+  needs: ["test-api", "test-ui"]
   script:
     - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
     - echo "Этот job генерирует отчеты из результатов тестов"
