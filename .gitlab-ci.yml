@@ -1,186 +1,93 @@
 # .gitlab-ci.yml
-image: python:3.11  # Шаг 2: Используем образ Python
+image: python:3.11
 
 variables:
-  ALLURE_RESULTS: "allure-results"  # Папка для результатов Allure
-  ALLURE_REPORT: "public"           # Папка для отчета (GitLab Pages)
+  BASE_URL: "$BASE_URL"
+  ALLURE_RESULTS: "allure-results"
+  ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
-# Шаг 2: Настройка кэша для зависимостей
 cache:
   paths:
     - .cache/pip
-    - .venv/       # Кэшируем виртуальное окружение
+    - .venv/
   key: "${CI_COMMIT_REF_SLUG}"
-  policy: pull-push
 
 stages:
-  - setup      # Подготовка окружения
-  - test       # Тестирование
-  - report     # Отчет
-  - deploy     # Публикация
+  - setup
+  - test
+  - report
+  - deploy
 
-# Шаг 3: Настройка окружения перед запуском тестов
 setup-environment:
   stage: setup
   script:
-    - echo "=== ПОДГОТОВКА ОКРУЖЕНИЯ ==="
-
-    # Создаем виртуальное окружение
     - python -m venv .venv
-
-    # Активируем виртуальное окружение
     - source .venv/bin/activate
-
-    # Обновляем pip
     - pip install --upgrade pip
-
-    # Устанавливаем зависимости с кэшированием
-    - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
-
-    # Устанавливаем дополнительные пакеты для тестирования
-    - pip install allure-pytest pytest requests
-
-    # Проверяем установку
-    - echo "=== УСТАНОВЛЕННЫЕ ПАКЕТЫ ==="
-    - pip list | grep -E "pytest|allure|requests"
-
-    - echo "Окружение готово!"
-
-  # Сохраняем окружение как артефакт
+    - pip install -r requirements.txt
+    - pip install allure-pytest pytest
   artifacts:
     paths:
       - .venv/
     expire_in: 1 hour
 
-  # Кэшируем зависимости
-  cache:
-    paths:
-      - .cache/pip
-      - .venv/
-    policy: push
-
-# Шаг 4: Запуск API-тестов
 test-api:
   stage: test
-  needs: ["setup-environment"]  # Зависим от этапа подготовки
+  needs: ["setup-environment"]
   script:
-    - echo "=== ЗАПУСК API-ТЕСТОВ ==="
-
-    # Активируем виртуальное окружение из артефакта
     - source .venv/bin/activate
-
-    # Создаем папку для результатов Allure
     - mkdir -p $ALLURE_RESULTS
-
-    # Запускаем тесты с маркером 'api' и сохраняем результаты для Allure
-    # Шаг 4: Используем тег api, сохраняем папку allure-results
-    - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API-тесты завершены"
-
-    - echo "API-тестирование завершено"
-
-  # Сохраняем результаты тестов
+    - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS
   artifacts:
-    when: always
     paths:
       - $ALLURE_RESULTS/
     expire_in: 1 week
 
-# Шаг 5: Запуск UI-тестов
 test-ui:
   stage: test
-  needs: ["setup-environment"]  # Зависим от этапа подготовки
+  needs: ["setup-environment"]
   script:
-    - echo "=== ЗАПУСК UI-ТЕСТОВ ==="
-
-    # Активируем виртуальное окружение
     - source .venv/bin/activate
-
-    # Шаг 5: Используем контейнер Selenium и устанавливаем Chrome-драйвер
-    echo "Устанавливаем Chrome и ChromeDriver..."
-
-    # Обновляем пакеты
     - apt-get update
-
-    # Устанавливаем системные зависимости
-    - apt-get install -y wget unzip
-
-    # Устанавливаем Chrome
+    - apt-get install -y wget
     - wget -q -O /etc/apt/trusted.gpg.d/google-chrome.asc https://dl.google.com/linux/linux_signing_key.pub
     - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
     - apt-get update
     - apt-get install -y google-chrome-stable
-
-    # Устанавливаем ChromeDriver через webdriver-manager
-    - pip install webdriver-manager
-
-    # Создаем папки для результатов
+    - mkdir -p screenshots
     - mkdir -p $ALLURE_RESULTS
-    - mkdir -p screenshots  # Папка для скриншотов
-
-    # Запускаем UI-тесты с маркером 'ui'
-    - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI-тесты завершены"
-
-    - echo "UI-тестирование завершено"
-
-  # Шаг 5: Сохраняем результаты и скриншоты
+    - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS
   artifacts:
-    when: always
     paths:
       - $ALLURE_RESULTS/
-      - screenshots/  # Сохраняем скриншоты
+      - screenshots/
     expire_in: 1 week
 
-# Шаг 6: Генерация Allure-отчетов
 generate-report:
   stage: report
-  needs: ["test-api", "test-ui"]  # Зависим от обоих тестов
+  needs: ["test-api", "test-ui"]
   script:
-    - echo "=== ГЕНЕРАЦИЯ ALLURE-ОТЧЕТОВ ==="
-
-    # Устанавливаем Allure CLI
     - apt-get update
     - apt-get install -y default-jre-headless wget unzip
     - wget https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
     - unzip allure-2.29.0.zip -d /opt/
     - ln -s /opt/allure-2.29.0/bin/allure /usr/bin/allure
-
-    # Проверяем установку
-    - allure --version
-
-    # Шаг 6: Генерируем отчет в папку public
     - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
-
-    - echo "Allure-отчет сгенерирован в папке $ALLURE_REPORT"
-
   artifacts:
     paths:
-      - $ALLURE_REPORT/  # Отчет для GitLab Pages
-    expire_in: 30 days
+      - $ALLURE_REPORT/
   only:
-    - main  # Только для ветки main
+    - main
 
-# Шаг 7: Публикация Allure-отчетов через GitLab Pages
 pages:
   stage: deploy
-  needs: ["generate-report"]  # Зависим от генерации отчета
+  needs: ["generate-report"]
   script:
-    - echo "=== ПУБЛИКАЦИЯ ALLURE-ОТЧЕТОВ ==="
-
-    # Копируем отчет в папку public (GitLab Pages автоматически раздает эту папку)
     - mkdir -p public
-    - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Отчет скопирован"
-
-    # Если отчет не сгенерировался, создаем заглушку
-    - if [ ! -f "public/index.html" ]; then
-        echo "<h1>Allure отчет о тестировании</h1><p>Отчет будет доступен после успешного выполнения тестов</p>" > public/index.html;
-      fi
-
-    - echo "Отчеты готовы для GitLab Pages!"
-
-  # Шаг 7: Используем папку public/ как артефакт
+    - cp -r $ALLURE_REPORT/* public/
   artifacts:
     paths:
-      - public  # GitLab Pages автоматически раздает эту папку
+      - public
   only:
-    - main  # Шаг 7: Настраиваем правило публикации для ветки main
+    - main
