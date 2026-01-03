@@ -7,6 +7,7 @@ variables:
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  CI: "true"
 
 cache:
   paths:
