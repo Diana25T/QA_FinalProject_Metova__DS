@@ -4,7 +4,6 @@ import sys
 import time
 from datetime import datetime, timedelta
 from selenium.webdriver.chrome.options import Options
-
 import allure
 import pytest
 from dotenv import load_dotenv
@@ -429,41 +428,25 @@ def cleanup_test_data(api_client):
 
 @pytest.fixture(scope="function")
 def driver():
-    """ИСПРАВЛЕННАЯ фикстура для CI"""
+    """Фикстура браузера с автоматическим скачиванием драйвера"""
 
+    # Создаем опции для Chrome
     chrome_options = Options()
 
-    # ОБЯЗАТЕЛЬНЫЕ опции для CI:
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--window-size=1920,1080')
-    chrome_options.add_argument('--disable-gpu')
-
-    # В CI используем системный Chrome
+    # Если запущено в CI, используем headless режим
     if os.getenv('CI') or os.getenv('GITLAB_CI'):
-        chrome_options.binary_location = '/usr/bin/google-chrome'
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
 
-        # В CI Chrome уже включает chromedriver, используем без Service
-        driver = webdriver.Chrome(options=chrome_options)  # ← БЕЗ Service!
-    else:
-        # Локально используем webdriver-manager
-        from selenium.webdriver.chrome.service import Service
-        from webdriver_manager.chrome import ChromeDriverManager
-
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     driver.implicitly_wait(10)
-
-    # URL из переменных окружения
-    base_url = os.getenv('BASE_URL', 'http://localhost:8000')
-    print(f"Opening: {base_url}")
-    driver.get(base_url)
+    driver.get(os.getenv('BASE_URL'))
 
     yield driver
-
     driver.quit()
+
 
 @pytest.fixture
 def login(browser) -> LoginPage:
