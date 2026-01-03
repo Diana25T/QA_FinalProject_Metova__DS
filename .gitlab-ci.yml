@@ -2,7 +2,7 @@
 image: python:3.11
 
 variables:
-  BASE_URL:  "$BASE_URL"
+  BASE_URL:  "$http://localhost:80"
   API_TOKEN: "$TANDOOR_TOKEN"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
