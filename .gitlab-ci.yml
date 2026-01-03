@@ -1,5 +1,5 @@
 # .gitlab-ci.yml
-image: python:3.11-slim  # ЛУЧШЕ ИСПОЛЬЗОВАТЬ SLIM
+image: python:3.11
 
 variables:
   ALLURE_RESULTS: "allure-results"
@@ -27,29 +27,25 @@ setup-environment:
     - mkdir -p $PIP_CACHE_DIR
     - pip install --upgrade pip
     - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
-    - echo " Зависимости установлены и закэшированы в $PIP_CACHE_DIR"
+    - echo "Зависимости установлены"
     - pip install allure-pytest pytest requests
     - pip install --cache-dir $PIP_CACHE_DIR allure-pytest pytest-html
     - apt-get update && apt-get install -y wget unzip
     - pip list | grep -E "pytest|allure|requests"
-    - echo "Окружение готово к тестированию!"
+    - echo "Окружение готово!"
   cache:
     paths:
       - .cache/pip
     policy: push
 
-# 2. TEST - API тесты (ИСПРАВЛЕНО: убрал лишние кавычки)
+# 2. TEST - API тесты
 test-api:
   stage: test
-  needs: ["setup-environment"]  # ИСПРАВЛЕНО
+  needs: ["setup-environment"]
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - echo "Этот job запускает API тесты"
-
-    # Устанавливаем пакеты ИЗ КЭША
-    - echo "Установка из кэша..."
     - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
-
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS || echo "API тесты завершены"
     - echo "API тестирование завершено"
@@ -59,37 +55,25 @@ test-api:
       - $ALLURE_RESULTS/
     expire_in: 1 week
 
-# 3. TEST - UI тесты (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+# 3. TEST - UI тесты
 test-ui:
   stage: test
-  needs: ["setup-environment"]  # ИСПРАВЛЕНО: убрал artifacts: true
+  needs: ["setup-environment"]
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Этот job запускает UI тесты с Selenium"
-
-    # Устанавливаем Chrome
     - echo "Устанавливаем Chrome..."
     - apt-get update
     - apt-get install -y wget gnupg
-    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-    - apt-get update  # ДОБАВИТЬ ЭТУ СТРОКУ!
+    - wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add -
+    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d.google-chrome.list
+    - apt-get update
     - apt-get install -y google-chrome-stable
-
-    # Проверяем Chrome
-    - echo "Chrome версия: $(google-chrome --version)"
-
-    # Очищаем кэш webdriver-manager
-    - rm -rf /root/.wdm 2>/dev/null || true
-
-    - echo "После установки зависимостей, запускаем UI тесты"
+    - echo "Chrome установлен"
     - pip install --cache-dir $PIP_CACHE_DIR -r requirements.txt
-    - pip install webdriver-manager  # ДОБАВИТЬ!
-
+    - pip install webdriver-manager
     - mkdir -p screenshots
     - mkdir -p $ALLURE_RESULTS
-
-    # Запускаем тесты
     - CI=true python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS || echo "UI тесты завершены"
     - echo "UI тестирование завершено"
   artifacts:
@@ -106,21 +90,14 @@ generate-report:
   script:
     - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
     - echo "Этот job генерирует отчеты из результатов тестов"
-
-    # Устанавливаем Allure CLI
     - apt-get update
     - apt-get install -y default-jre-headless wget unzip
     - wget https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
     - unzip allure-2.29.0.zip -d /opt/
     - ln -s /opt/allure-2.29.0/bin/allure /usr/bin/allure
     - allure --version
-
-    # Генерируем отчет
     - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
-
-    - echo "Отчет сгенерирован в папке $ALLURE_REPORT"
-    - ls -la $ALLURE_REPORT/
-
+    - echo "Отчет сгенерирован"
   artifacts:
     paths:
       - $ALLURE_REPORT/
@@ -136,7 +113,7 @@ pages:
     - echo "=== ПУБЛИКАЦИЯ ОТЧЕТОВ НА GITLAB PAGES ==="
     - mkdir -p public
     - cp -r $ALLURE_REPORT/* public/ 2>/dev/null || echo "Копирование отчетов"
-    - echo "Отчеты готовы для GitLab Pages"
+    - echo "Отчеты готовы"
   artifacts:
     paths:
       - public
