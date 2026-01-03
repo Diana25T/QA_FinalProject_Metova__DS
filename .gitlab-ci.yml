@@ -3,6 +3,7 @@ image: python:3.11
 
 variables:
   BASE_URL: "https://app.tandoor.dev/"
+  API_TOKEN: "$API_TOKEN"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -22,6 +23,9 @@ stages:
 setup-environment:
   stage: setup
   script:
+    - echo "=== ПОДГОТОВКА ОКРУЖЕНИЯ ==="
+    - echo "BASE_URL:$BASE_URL"
+    - echo "API_TOKEN доступен:${API_TOKEN:0:10}..."
     - python -m venv .venv
     - source .venv/bin/activate
     - pip install --upgrade pip
@@ -35,9 +39,9 @@ setup-environment:
 test-api:
   stage: test
   needs: ["setup-environment"]
-  variables:
-    BASE_URL: "$BASE_URL"
   script:
+    - echo "=== ЗАПУСК API ТЕСТОВ ==="
+    - echo "Используем токен:${API_TOKEN:0:10}..."
     - source .venv/bin/activate
     - mkdir -p $ALLURE_RESULTS
     - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS
@@ -49,8 +53,6 @@ test-api:
 test-ui:
   stage: test
   needs: ["setup-environment"]
-  variables:
-    BASE_URL: "$BASE_URL"
   before_script:
     - source .venv/bin/activate
   script:
@@ -88,6 +90,7 @@ generate-report:
   stage: report
   needs: ["test-api", "test-ui"]
   script:
+    - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
     - apt-get update
     - apt-get install -y default-jre-headless wget unzip
     - wget https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
