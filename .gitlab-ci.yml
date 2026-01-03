@@ -1,8 +1,15 @@
 # .gitlab-ci.yml
 image: python:3.11
 
+# ДОБАВЛЯЕМ СЕРВИСЫ как в docker-compose
+services:
+  - name: postgres:16-alpine
+    alias: db_recipes
+  - name: vabene1111/recipes:latest
+    alias: web_recipes
+
 variables:
-  BASE_URL:  "http://localhost"
+  BASE_URL: "http://web_recipes:80"
   API_TOKEN: "$TANDOOR_TOKEN"
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
@@ -27,6 +34,16 @@ setup-environment:
     - echo "=== ПОДГОТОВКА ОКРУЖЕНИЯ ==="
     - echo "BASE_URL:$BASE_URL"
     - echo "API_TOKEN доступен:${API_TOKEN:0:10}..."
+    - sleep 30
+
+     # ПРОВЕРЯЕМ ДОСТУПНОСТЬ
+    - |
+     if curl -s -f "$BASE_URL" > /dev/null; then
+     echo "Приложение доступно"
+     else
+     echo "Приложение еще не готово, продолжаем..."
+     fi
+
     - python -m venv .venv
     - source .venv/bin/activate
     - pip install --upgrade pip
