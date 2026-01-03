@@ -2,7 +2,7 @@
 image: python:3.11
 
 variables:
-  BASE_URL: "$BASE_URL"
+  BASE_URL: "http://localhost:8000"  # ИЛИ ВАШ РЕАЛЬНЫЙ URL
   ALLURE_RESULTS: "allure-results"
   ALLURE_REPORT: "public"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
@@ -47,18 +47,45 @@ test-api:
 test-ui:
   stage: test
   needs: ["setup-environment"]
-  script:
+  before_script:
     - source .venv/bin/activate
+  script:
+    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
+
+    # УСТАНАВЛИВАЕМ CHROME БЕЗ apt-key
+    - echo "Устанавливаем Chrome..."
     - apt-get update
+
+    # Устанавливаем необходимые пакеты
     - apt-get install -y wget
-    - wget -q -O /etc/apt/trusted.gpg.d/google-chrome.asc https://dl.google.com/linux/linux_signing_key.pub
-    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+
+    # Скачиваем ключ Google Chrome
+    - mkdir -p /etc/apt/keyrings
+    - wget -q -O /etc/apt/keyrings/google-chrome.asc https://dl.google.com/linux/linux_signing_key.pub
+
+    # Добавляем репозиторий Chrome
+    - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.asc] http://dl.google.com/linux/chrome/deb/ stable main" | tee /etc/apt/sources.list.d/google-chrome.list
+
+    # Обновляем и устанавливаем
     - apt-get update
     - apt-get install -y google-chrome-stable
+
+    # Проверяем установку
+    - echo "Chrome version: $(google-chrome --version || echo 'Not installed')"
+
+    # Устанавливаем webdriver-manager
+    - pip install webdriver-manager
+
+    # Создаем директории
     - mkdir -p screenshots
     - mkdir -p $ALLURE_RESULTS
+
+    # Запускаем UI тесты
     - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS
+
+    - echo "UI тестирование завершено"
   artifacts:
+    when: always
     paths:
       - $ALLURE_RESULTS/
       - screenshots/
