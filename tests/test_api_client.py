@@ -1,10 +1,13 @@
+import allure
 import pytest
 
 from api.client import TandoorAPIClient
-from tests.conftest import basic_recipe_data, api_client, temporary_recipe
+from tests.conftest import api_client, temporary_recipe
 
 
 @pytest.mark.api
+@allure.title("Проверка аутентификации через Bearer Token")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_bearer_token_auth():
     """Тестирует аутентификацию через Bearer Token"""
     client = TandoorAPIClient()
@@ -20,6 +23,8 @@ def test_bearer_token_auth():
 
 
 @pytest.mark.api
+@allure.title("Проверка доступности API")
+@allure.severity(allure.severity_level.BLOCKER)
 def test_api_health(api_client):
     """Проверяет доступность API"""
     try:
@@ -32,6 +37,8 @@ def test_api_health(api_client):
 
 
 @pytest.mark.api
+@allure.title("Получение списка всех рецептов")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_get_recipes(api_client):
     """Получает рецепты через  API
      и проверяет наличия ключа 'results'"""
@@ -47,6 +54,8 @@ def test_get_recipes(api_client):
 
 
 @pytest.mark.api
+@allure.title("Импорт рецептов из внешних источников")
+@allure.severity(allure.severity_level.NORMAL)
 def test_import_recipes(recipe_data):
     """Импортирует рецепты по ссылкам"""
     print(f" Всего успешно импортировано и сохранено рецептов: {len(recipe_data)}")
@@ -66,6 +75,8 @@ def test_import_recipes(recipe_data):
 
 
 @pytest.mark.api
+@allure.title("Создание нового рецепта через API")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_create_recipe(api_client, temporary_recipe):
     """Тестирует создание простого рецепта через API"""
     recipe_id = temporary_recipe['id']
@@ -77,6 +88,8 @@ def test_create_recipe(api_client, temporary_recipe):
 
 
 @pytest.mark.api
+@allure.title("Удаление рецепта по ID")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_delete_recipe_by_id(api_client, temporary_recipe):
     """Проверяет удаление рецепта по id"""
     recipe_id = temporary_recipe['id']
@@ -102,6 +115,8 @@ def test_delete_recipe_by_id(api_client, temporary_recipe):
 
 
 @pytest.mark.api
+@allure.title("Поиск и удаление дубликатов рецептов")
+@allure.severity(allure.severity_level.NORMAL)
 def test_remove_dublicate_recipes(api_client):
     """Удаляет рубликаты рецептов"""
     print("Ищем повторяющиея рецепты")
@@ -153,6 +168,3 @@ def test_remove_dublicate_recipes(api_client):
     # 6. Результаты
     print(f"Готово!Удалено: {deleted_count} дубликатов")
     print(f" Осталось {len(recipes) - deleted_count} уникальных рецептов")
-
-
-
