@@ -1,12 +1,16 @@
 from datetime import datetime
 
+import allure
 import pytest
 
 from tests.conftest import temporary_meal_plan_for_ui, clean_test_plan_ui
 
+
 #===ТЕСТИРОВАНИЕ UI ПЛАНА ПИТАНИЯ===
 
-@pytest.mark.api
+@pytest.mark.ui
+@allure.title("Создание плана питания через пользовательский интерфейс")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_create_plan_with_fixture(meal_plan_page, clean_test_plan_ui):
     """Проверка корректности создания плана через UI
     Фикстура очищает данные до и после теста"""
@@ -31,9 +35,12 @@ def test_create_plan_with_fixture(meal_plan_page, clean_test_plan_ui):
 
     print(f"Тест пройден: план '{plan_name}' создан и отображается")
 
-@pytest.mark.api
+@pytest.mark.ui
+@allure.title("Удаление плана питания через UI с подтверждением через API")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_delete_plan(api_client, meal_plan_page, temporary_meal_plan_for_ui):
     """Проверяет корректность удаления через UI c подтверждением через API"""
+
     # Предварительная подготовка: план создается фикстурой
     meal_plan_page.open_meal_plan_page()
     plan_name = temporary_meal_plan_for_ui
@@ -52,6 +59,8 @@ def test_delete_plan(api_client, meal_plan_page, temporary_meal_plan_for_ui):
 #===ТЕСТИРОВАНИЕ UI СПИСКА ПОКУПОК===
 
 @pytest.mark.ui
+@allure.title("Автоматическое добавление продуктов в список покупок при создании плана")
+@allure.severity(allure.severity_level.NORMAL)
 def test_product_added_in_shopping_list(meal_plan_page, shopping_list_page, temporary_meal_plan_for_ui):
     """Фикстура, если нужно, создает и обязательно удаляет план. Тест проверяет автоматическую
      интеграцию продукта в список покупок(корзина) после создания плана с отметкой чек-бокса"""
