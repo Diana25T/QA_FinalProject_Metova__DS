@@ -1,10 +1,14 @@
 import time
 
+import allure
 import pytest
 
 from pages import LoginPage
 
+
 @pytest.mark.api
+@allure.title("Успешная авторизация пользователя через UI")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_success_login(driver):
   """Тест логина """
   page = LoginPage(driver)
