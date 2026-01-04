@@ -69,8 +69,8 @@ test_api:
 
     # Выводим информацию о переменных (маскированные не покажутся в логах)
     - echo "Запускаем API тесты на $BASE_URL"
-        - echo "Пользователь: $TANDOOR_USERNAME"
-        - echo "Bearer Token: ${TANDOOR_TOKEN:0:10}..."
+        - echo "Пользователь:$TANDOOR_USERNAME"
+        - echo "Bearer Token:$TANDOOR_TOKEN:0:10..."
 
     # Запускаем API тесты с маркировкой 'api'
     - pytest tests/ -m api -v --alluredir=allure-results-api
