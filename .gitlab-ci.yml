@@ -1,127 +1,174 @@
 # .gitlab-ci.yml
+# Используем образ Python
 image: python:3.11
 
+# Переменные, которые будут использоваться в пайплайне
 variables:
-  BASE_URL: "$BASE_URL"
-  API_TOKEN: "$TANDOOR_TOKEN"
-  ALLURE_RESULTS: "allure-results"
-  ALLURE_REPORT: "public"
+  BASE_URL: $BASE_URL
+  TANDOOR_TOKEN: $TANDOOR_TOKEN
+  TANDOOR_USERNAME: $TANDOOR_USERNAME
+  TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  CI: "true"
 
+# Кэширование зависимостей Python для ускорения сборок
 cache:
   paths:
     - .cache/pip
-    - .venv/
-  key: "${CI_COMMIT_REF_SLUG}"
+    - venv/
 
+# Определяем этапы выполнения пайплайна
 stages:
-  - setup
-  - test
+  - prepare
+  - test_api
+  - test_ui
   - report
   - deploy
 
-setup-environment:
-  stage: setup
+# Этап 1: Подготовка зависимостей и окружения
+prepare_dependencies:
+  stage: prepare
   script:
-    - echo "=== ПОДГОТОВКА ОКРУЖЕНИЯ ==="
-    - echo "BASE_URL:$BASE_URL"
-    - echo "TANDOOR_TOKEN доступен:${TANDOOR_TOKEN:0:10}..."
-    - sleep 30
+    # Создаем виртуальное окружение Python
+    - python -m venv venv
+    - source venv/bin/activate
 
-     # ПРОВЕРЯЕМ ДОСТУПНОСТЬ
-    - |
-     if curl -s -f "$BASE_URL" > /dev/null; then
-     echo "Приложение доступно"
-     else
-     echo "Приложение еще не готово, продолжаем..."
-     fi
-
-    - python -m venv .venv
-    - source .venv/bin/activate
+    # Обновляем pip и устанавливаем зависимости
     - pip install --upgrade pip
-    - pip install -r requirements.txt
-    - pip install allure-pytest pytest
+    - pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt
+
+    # Устанавливаем Allure командной строки
+    - wget -q "https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz"
+    - tar -xzf allure-2.24.1.tgz -C /opt/
+    - ln -s /opt/allure-2.24.1/bin/allure /usr/bin/allure
+    - allure --version
+
+    # Устанавливаем Chrome и ChromeDriver для UI тестов
+    - apt-get update
+    - apt-get install -y wget unzip chromium-driver
+
   artifacts:
     paths:
-      - .venv/
+      - venv/
     expire_in: 1 hour
+  rules:
+    - if: '$CI_MERGE_REQUEST_ID'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
-test-api:
-  stage: test
-  needs: ["setup-environment"]
+# Этап 2: Запуск API тестов
+test_api:
+  stage: test_api
+  needs:
+    - prepare_dependencies
   script:
-    - echo "=== ЗАПУСК API ТЕСТОВ ==="
-    - echo "Используем токен:${API_TOKEN:0:10}..."
-    - source .venv/bin/activate
-    - mkdir -p $ALLURE_RESULTS
-    - python -m pytest tests/ -m api -v --alluredir=$ALLURE_RESULTS
+    # Активируем виртуальное окружение
+    - source venv/bin/activate
+
+    # Выводим информацию о переменных (маскированные не покажутся в логах)
+    - echo "Запускаем API тесты на $BASE_URL"
+    - echo "Пользователь:$TANDOOR_USERNAME"
+
+    # Запускаем API тесты с маркировкой 'api'
+    - pytest tests/ -m api -v --alluredir=allure-results-api
+
   artifacts:
-    paths:
-      - $ALLURE_RESULTS/
+    when: always  # Сохраняем артефакты даже если тесты упали
     expire_in: 1 week
+    paths:
+      - allure-results-api/
+      - test-results-api.xml
+    reports:
+      junit: test-results-api.xml
+  rules:
+    - if: '$CI_MERGE_REQUEST_ID'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
-test-ui:
-  stage: test
-  needs: ["setup-environment"]
+# Этап 3: Запуск UI тестов
+test_ui:
+  stage: test_ui
+  needs:
+    - prepare_dependencies
   before_script:
-    - source .venv/bin/activate
+    # Устанавливаем Chrome и ChromeDriver
+    - apt-get update
+    - apt-get install -y wget unzip chromium chromium-driver
+    - wget -q https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip
+    - unzip chromedriver-linux64.zip
+    - mv chromedriver-linux64/chromedriver /usr/local/bin/
+    - chmod +x /usr/local/bin/chromedriver
+    - chromedriver --version
   script:
-    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
+    # Активируем виртуальное окружение
+    - source venv/bin/activate
 
-    # УСТАНАВЛИВАЕМ CHROME БЕЗ apt-key
-    - echo "Устанавливаем Chrome..."
-    - apt-get update
+    # Запускаем UI тесты с маркировкой 'ui'
+    - echo "Запускаем UI тесты"
+    - pytest tests/ -m ui -v --alluredir=allure-results-ui
 
-    # Устанавливаем необходимые пакеты
-    - apt-get update
-    - apt-get install -y wget
+    # Если есть падения, сохраняем скриншоты
+    - |
+      if [ -d "screenshots" ]; then
+        echo "Скриншоты найдены, сохраняем..."
+        mkdir -p screenshots-output
+        cp -r screenshots/* screenshots-output/ 2>/dev/null || true
+      fi
 
-    # Скачиваем ключ Google Chrome
-    - wget -q -O google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    - apt-get install -y ./google-chrome.deb
-    - echo "Chrome version:"
-    - google-chrome --version || echo "Chrome не установлен"
-    - pip install webdriver-manager selenium
-    - mkdir -p screenshots
-    - mkdir -p $ALLURE_RESULTS
-
-    # Запускаем UI тесты
-    - python -m pytest tests/ -m ui -v --alluredir=$ALLURE_RESULTS
-
-    - echo "UI тестирование завершено"
   artifacts:
     when: always
-    paths:
-      - $ALLURE_RESULTS/
-      - screenshots/
     expire_in: 1 week
+    paths:
+      - allure-results-ui/
+      - screenshots-output/
+      - test-results-ui.xml
+    reports:
+      junit: test-results-ui.xml
+  rules:
+    - if: '$CI_MERGE_REQUEST_ID'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
-generate-report:
+# Этап 4: Генерация отчета Allure
+generate_allure_report:
   stage: report
-  needs: ["test-api", "test-ui"]
+  needs:
+    - job: test_api
+      artifacts: true
+    - job: test_ui
+      artifacts: true
   script:
-    - echo "=== ГЕНЕРАЦИЯ ALLURE ОТЧЕТОВ ==="
-    - apt-get update
-    - apt-get install -y default-jre-headless wget unzip
-    - wget https://github.com/allure-framework/allure2/releases/download/2.29.0/allure-2.29.0.zip
-    - unzip allure-2.29.0.zip -d /opt/
-    - ln -s /opt/allure-2.29.0/bin/allure /usr/bin/allure
-    - allure generate $ALLURE_RESULTS -o $ALLURE_REPORT --clean
+    - echo "Генерация объединенного Allure отчета..."
+
+    # Объединяем результаты API и UI тестов
+    - mkdir -p allure-results-combined
+
+    # Копируем результаты API тестов
+    - cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || echo "API результатов нет"
+
+    # Копируем результаты UI тестов
+    - cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || echo "UI результатов нет"
+
+    # Генерируем HTML отчет
+    - allure generate allure-results-combined --clean -o public
+
+    # Проверяем что отчет создан
+    - ls -la public/
+
   artifacts:
     paths:
-      - $ALLURE_REPORT/
-  only:
-    - main
+      - public/
+    expire_in: 30 days
+  rules:
+    - if: '$CI_MERGE_REQUEST_ID'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
+# Этап 5: Публикация отчета на GitLab Pages
 pages:
   stage: deploy
-  needs: ["generate-report"]
+  dependencies:
+    - generate_allure_report
   script:
-    - mkdir -p public
-    - cp -r $ALLURE_REPORT/* public/
+    - echo "Публикация Allure отчета на GitLab Pages..."
+    - echo "Отчет будет доступен по адресу:https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME"
   artifacts:
     paths:
       - public
   only:
-    - main
+    - main  # Публикуем отчет только для ветки main
