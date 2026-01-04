@@ -1,4 +1,5 @@
 import pytest
+
 from tests.conftest import api_client
 
 
@@ -16,7 +17,7 @@ def test_create_meal_plan_with_fixture(api_client, temporary_meal_plan):
     assert response is not None, 'План не найден после создания'
     assert json_data['id'] == plan_id, "План не найден после создания"
 
-
+@pytest.mark.api
 def test_get_meal_plan_list_2(api_client):
     """Получает список планов и проверяет наличие обязаельных полей:
     servings,
@@ -37,7 +38,7 @@ def test_get_meal_plan_list_2(api_client):
         # Можно проверить формат даты, например, что это строка
         assert isinstance(plan['from_date'], str), "from_date не строка"
 
-
+@pytest.mark.api
 def test_create_meal_plan(api_client, temporary_meal_plan):
     """Создает план питания через API"""
     response = temporary_meal_plan
@@ -52,7 +53,7 @@ def test_create_meal_plan(api_client, temporary_meal_plan):
     print(f" Создан план с ID:{plan_id} ")
     print(f"Создан план: {response.get('title')}")
 
-
+@pytest.mark.api
 def test_delete_meal_plan(api_client, temporary_meal_plan):
     """Проверяет удаление плана через API используя фикстуру
     с автоматической очисткой"""
@@ -66,6 +67,7 @@ def test_delete_meal_plan(api_client, temporary_meal_plan):
 
 #===ТЕСТЫ ДЛЯ СПИСКА ПОКУПОК===
 
+@pytest.mark.api
 def test_get_shopping_list(api_client):
     """Получает лист покупок"""
     response = api_client.get_shopping_list_recipe()
@@ -78,7 +80,7 @@ def test_get_shopping_list(api_client):
     assert shopping_list_ids is not None, "ID не получен"
     print(f"Получены продукты c названием {recipe_names} и ID: {shopping_list_ids}")
 
-
+@pytest.mark.api
 def test_add_to_shopping_list(api_client, temporary_shopping_list):
     """Добавляет данные в лист покупок используя фикстуру
     с автоматической очисткой  """
