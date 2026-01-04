@@ -31,7 +31,7 @@ prepare_dependencies:
   script:
     # Устанавливаем Java (требуется для Allure)
     - apt-get update
-    - apt-get install -y default-jre-headless wget
+    - apt-get install -y default-jre-headless wget unzip curl gnupg
 
     # Создаем виртуальное окружение Python
     - python -m venv venv
@@ -47,8 +47,8 @@ prepare_dependencies:
     - ln -sf /opt/allure-2.24.1/bin/allure /usr/local/bin/allure
     - allure --version
 
-    # Устанавливаем Chrome и ChromeDriver для UI тестов
-    - apt-get install -y unzip
+    # Проверяем что Java установлена
+    - java --version
 
   artifacts:
     paths:
@@ -67,23 +67,22 @@ test_api:
     # Активируем виртуальное окружение
     - source venv/bin/activate
 
-    # Выводим информацию о переменных (маскированные не покажутся в логах)
+    # Выводим информацию о переменных
     - echo "Запускаем API тесты на $BASE_URL"
-        - echo "Пользователь:$TANDOOR_USERNAME"
-        - echo "Bearer Token:$TANDOOR_TOKEN:0:10..."
+    - echo "Пользователь:$TANDOOR_USERNAME"
+    - echo "Bearer Token (первые 10 символов):${TANDOOR_TOKEN:0:10}..."
 
-    # Запускаем API тесты с маркировкой 'api'
-    - pytest tests/ -m api -v --alluredir=allure-results-api
+    # Запускаем API тесты с маркировкой 'api' и создаем JUnit отчет
+    - pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
 
   artifacts:
-    when: always  # Сохраняем артефакты даже если тесты упали
+    when: always
     expire_in: 1 week
     paths:
       - allure-results-api/
+      - junit-api.xml
     reports:
-      junit:
-        - test-results-*.xml
-        - junit-*.xml
+      junit: junit-api.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -94,21 +93,28 @@ test_ui:
   needs:
     - prepare_dependencies
   before_script:
-    # Устанавливаем Chrome и ChromeDriver
+    # Устанавливаем Google Chrome и зависимости
     - apt-get update
-    - apt-get install -y wget unzip chromium chromium-driver
+    - apt-get install -y wget gnupg
 
-    # Устанавливаем ChromeDriver через webdriver-manager
-    - source venv/bin/activate
-    - python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
+    # Добавляем репозиторий Google Chrome
+    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
+
+    # Устанавливаем Chrome и зависимости
+    - apt-get update
+    - apt-get install -y google-chrome-stable xvfb libnss3 libgconf-2-4 libxss1
+
+    # Проверяем версию Chrome
+    - google-chrome --version
 
   script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
 
-    # Запускаем UI тесты с маркировкой 'ui'
+    # Запускаем UI тесты с маркировкой 'ui' через xvfb
     - echo "Запускаем UI тесты"
-    - pytest tests/ -m ui -v --alluredir=allure-results-ui
+    - xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
 
     # Если есть падения, сохраняем скриншоты
     - |
@@ -124,10 +130,9 @@ test_ui:
     paths:
       - allure-results-ui/
       - screenshots-output/
+      - junit-ui.xml
     reports:
-      junit:
-        - test-results-*.xml
-        - junit-*.xml
+      junit: junit-ui.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -168,7 +173,7 @@ generate_allure_report:
 
     # Генерируем HTML отчет
     - echo "Содержимое allure-results-combined:"
-    - ls -la allure-results-combined/ 2>/dev/null || echo "Директория пуста"
+    - find allure-results-combined -type f 2>/dev/null | head -5 || echo "Директория пуста"
 
     - allure generate allure-results-combined --clean -o public
 
