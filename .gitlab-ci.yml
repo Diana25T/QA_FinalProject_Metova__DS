@@ -28,6 +28,10 @@ stages:
 prepare_dependencies:
   stage: prepare
   script:
+    # Устанавливаем Java (требуется для Allure)
+    - apt-get update
+    - apt-get install -y default-jre-headless wget
+
     # Создаем виртуальное окружение Python
     - python -m venv venv
     - source venv/bin/activate
@@ -39,12 +43,11 @@ prepare_dependencies:
     # Устанавливаем Allure командной строки
     - wget -q "https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz"
     - tar -xzf allure-2.24.1.tgz -C /opt/
-    - ln -s /opt/allure-2.24.1/bin/allure /usr/bin/allure
+    - ln -sf /opt/allure-2.24.1/bin/allure /usr/local/bin/allure
     - allure --version
 
     # Устанавливаем Chrome и ChromeDriver для UI тестов
-    - apt-get update
-    - apt-get install -y wget unzip chromium-driver
+    - apt-get install -y unzip
 
   artifacts:
     paths:
@@ -75,9 +78,10 @@ test_api:
     expire_in: 1 week
     paths:
       - allure-results-api/
-      - test-results-api.xml
     reports:
-      junit: test-results-api.xml
+      junit:
+        - test-results-*.xml
+        - junit-*.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -91,11 +95,11 @@ test_ui:
     # Устанавливаем Chrome и ChromeDriver
     - apt-get update
     - apt-get install -y wget unzip chromium chromium-driver
-    - wget -q https://storage.googleapis.com/chrome-for-testing-public/latest/linux64/chromedriver-linux64.zip
-    - unzip chromedriver-linux64.zip
-    - mv chromedriver-linux64/chromedriver /usr/local/bin/
-    - chmod +x /usr/local/bin/chromedriver
-    - chromedriver --version
+
+    # Устанавливаем ChromeDriver через webdriver-manager
+    - source venv/bin/activate
+    - python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
+
   script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
@@ -118,9 +122,10 @@ test_ui:
     paths:
       - allure-results-ui/
       - screenshots-output/
-      - test-results-ui.xml
     reports:
-      junit: test-results-ui.xml
+      junit:
+        - test-results-*.xml
+        - junit-*.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
@@ -136,19 +141,37 @@ generate_allure_report:
   script:
     - echo "Генерация объединенного Allure отчета..."
 
+    # Проверяем что Java установлена
+    - java --version
+    - allure --version
+
     # Объединяем результаты API и UI тестов
     - mkdir -p allure-results-combined
 
     # Копируем результаты API тестов
-    - cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || echo "API результатов нет"
+    - if [ -d "allure-results-api" ]; then
+        echo "Копируем результаты API тестов..."
+        cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || true
+      else
+        echo "Директория allure-results-api не найдена"
+      fi
 
     # Копируем результаты UI тестов
-    - cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || echo "UI результатов нет"
+    - if [ -d "allure-results-ui" ]; then
+        echo "Копируем результаты UI тестов..."
+        cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || true
+      else
+        echo "Директория allure-results-ui не найдена"
+      fi
 
     # Генерируем HTML отчет
+    - echo "Содержимое allure-results-combined:"
+    - ls -la allure-results-combined/ 2>/dev/null || echo "Директория пуста"
+
     - allure generate allure-results-combined --clean -o public
 
     # Проверяем что отчет создан
+    - echo "Содержимое public:"
     - ls -la public/
 
   artifacts:
