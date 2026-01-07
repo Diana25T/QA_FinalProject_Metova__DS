@@ -50,6 +50,9 @@ prepare_dependencies:
     # Проверяем что Java установлена
     - java --version
 
+    # Предварительная загрузка ChromeDriver через webdriver-manager
+    - python -c "from webdriver_manager.chrome import ChromeDriverManager; ChromeDriverManager().install()"
+
   artifacts:
     paths:
       - venv/
@@ -94,35 +97,55 @@ test_ui:
     - prepare_dependencies
   before_script:
     # Устанавливаем Google Chrome и зависимости
+    # Устанавливаем Google Chrome (современный способ без apt-key)
     - apt-get update
-    - apt-get install -y wget gnupg
+    - apt-get install -y --no-install-recommends wget gnupg2 curl unzip xvfb libnss3 libgconf-2-4 libxss1 libasound2
 
-    # Добавляем репозиторий Google Chrome
-    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
-
-    # Устанавливаем Chrome и зависимости
+    # Устанавливаем Chrome через официальный репозиторий (новый метод)
+    - wget -q -O /usr/share/keyrings/google-chrome-keyring.gpg https://dl.google.com/linux/linux_signing_key.pub
+    - echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
     - apt-get update
-    - apt-get install -y google-chrome-stable xvfb libnss3 libgconf-2-4 libxss1
+    - apt-get install -y --no-install-recommends google-chrome-stable
 
     # Проверяем версию Chrome
+    - echo "Установлен Chrome:"
     - google-chrome --version
 
+    # Устанавливаем зависимости для Xvfb
+    - apt-get install -y xvfb x11-utils
+
+    # Запускаем виртуальный дисплей
+    - Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+    - sleep 3
+
+    # Проверяем Xvfb
+    - xdpyinfo -display :99 >/dev/null 2>&1 && echo "Xvfb запущен" || echo "Xvfb не запущен"
+
   script:
-    # Активируем виртуальное окружение
+      # Активируем виртуальное окружение
     - source venv/bin/activate
 
-    # Запускаем UI тесты с маркировкой 'ui' через xvfb
-    - echo "Запускаем UI тесты"
-    - xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
+    # Устанавливаем переменную окружения для Chrome
+    - export DISPLAY=:99
 
-    # Если есть падения, сохраняем скриншоты
+    # Создаем директории для артефактов
+    - mkdir -p allure-results-ui screenshots-output
+
+    # Запускаем UI тесты
+    - echo "Запускаем UI тесты на дисплее $DISPLAY"
+    - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml || true
+
+    # Копируем скриншоты если они есть
     - |
       if [ -d "screenshots" ]; then
-        echo "Скриншоты найдены, сохраняем..."
-        mkdir -p screenshots-output
+        echo "Найдены скриншоты, копируем..."
         cp -r screenshots/* screenshots-output/ 2>/dev/null || true
       fi
+      
+      # Проверяем что отчеты созданы
+      echo "Проверка созданных файлов:"
+      ls -la allure-results-ui/ 2>/dev/null || echo "Директория allure-results-ui не создана"
+      ls -la screenshots-output/ 2>/dev/null || echo "Директория screenshots-output не создана"
 
   artifacts:
     when: always
