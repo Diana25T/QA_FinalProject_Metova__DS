@@ -6,7 +6,7 @@ import pytest
 from pages import LoginPage
 
 
-@pytest.mark.api
+@pytest.mark.ui
 @allure.title("Успешная авторизация пользователя через UI")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_success_login(driver):
