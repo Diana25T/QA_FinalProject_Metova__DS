@@ -1,5 +1,5 @@
 # .gitlab-ci.yml
-# Используем образ Python
+# Используем образ Python для большинства этапов
 image: python:3.11
 
 # Переменные, которые будут использоваться в пайплайне
@@ -9,6 +9,8 @@ variables:
   TANDOOR_USERNAME: $TANDOOR_USERNAME
   TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"  # Для использования services
+  CI: "true"  # Обязательно установите это для фикстуры
 
 # Кэширование зависимостей Python для ускорения сборок
 cache:
@@ -40,7 +42,6 @@ prepare_dependencies:
     # Обновляем pip и устанавливаем зависимости
     - pip install --upgrade pip
     - pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt
-    - pip install --upgrade pip
     - pip install pytest pytest-html allure-pytest requests selenium webdriver-manager
 
     # Устанавливаем Allure командной строки
@@ -55,6 +56,7 @@ prepare_dependencies:
   artifacts:
     paths:
       - venv/
+      - /opt/allure-2.24.1/
     expire_in: 1 hour
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
@@ -89,37 +91,38 @@ test_api:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 3: Запуск UI тестов
+# Этап 3: Запуск UI тестов (используем Selenium как сервис)
 test_ui:
   stage: test_ui
+  image: python:3.11  # Используем Python образ, а не Selenium
+  services:
+    - name: selenium/standalone-chrome:latest
+      alias: selenium-standalone-chrome
+  variables:
+    # Переменная для вашей фикстуры
+    SELENIUM_REMOTE_URL: "http://selenium-standalone-chrome:4444/wd/hub"
+    CI: "true"
   needs:
     - prepare_dependencies
   before_script:
-      - apt-get update
-      - apt-get install -y wget gnupg curl unzip
-     # Установка Chrome
-      - mkdir -p /etc/apt/keyrings
-      - wget -q -O /etc/apt/keyrings/google-chrome.gpg https://dl-ssl.google.com/linux/linux_signing_key.pub
-      - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-      - apt-get update
-      - apt-get install -y google-chrome-stable
-      # Установка зависимостей для Chrome в headless режиме
-      - apt-get install -y libxss1 libappindicator1 libindicator7 libasound2 libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxcursor1 libxi6 libxtst6 fonts-liberation
-      - google-chrome --version
-      # Проверка установки ChromeDriver
-      - python -c "from webdriver_manager.chrome import ChromeDriverManager; print('ChromeDriver manager готов')"
+    # Активируем виртуальное окружение
+    - source venv/bin/activate
+    # Ждем запуска Selenium сервиса
+    - sleep 10  # Даем время Selenium запуститься
+    # Проверяем доступность Selenium
+    - curl -s http://selenium-standalone-chrome:4444/wd/hub/status|grep '"ready":true' || echo "Selenium не готов"
   script:
-      - source venv/bin/activate
-      - echo "Запускаем UI тесты на $BASE_URL"
-      - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
+    - echo "Запускаем UI тесты на $BASE_URL"
+    - echo "Используем Selenium по адресу:$SELENIUM_REMOTE_URL"
+    - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
   artifacts:
-      when: always
-      paths:
-        - allure-results-ui/
-        - screenshots-output/
-        - junit-ui.xml
-      reports:
-        junit: junit-ui.xml
+    when: always
+    paths:
+      - allure-results-ui/
+      - screenshots-output/
+      - junit-ui.xml
+    reports:
+      junit: junit-ui.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
