@@ -94,13 +94,10 @@ test_ui:
   stage: test_ui
   needs:
     - prepare_dependencies
-  test_ui:
-    stage: test_ui
-    image: python:3.11
-    before_script:
+  before_script:
       - apt-get update
       - apt-get install -y wget gnupg curl unzip
-      # Установка Chrome для Debian 12+ (без apt-key)
+     # Установка Chrome
       - mkdir -p /etc/apt/keyrings
       - wget -q -O /etc/apt/keyrings/google-chrome.gpg https://dl-ssl.google.com/linux/linux_signing_key.pub
       - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
@@ -111,11 +108,11 @@ test_ui:
       - google-chrome --version
       # Проверка установки ChromeDriver
       - python -c "from webdriver_manager.chrome import ChromeDriverManager; print('ChromeDriver manager готов')"
-    script:
+  script:
       - source venv/bin/activate
       - echo "Запускаем UI тесты на $BASE_URL"
       - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
-    artifacts:
+  artifacts:
       when: always
       paths:
         - allure-results-ui/
