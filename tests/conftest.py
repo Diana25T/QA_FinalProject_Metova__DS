@@ -439,14 +439,27 @@ def driver():
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--disable-dev-shm-usage')
 
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
+        # ВАЖНО: Если используем Selenium контейнер, не устанавливаем ChromeDriver
+        if os.getenv('SELENIUM_REMOTE_URL'):
+            # Используем Remote WebDriver для контейнера
+            driver = webdriver.Remote(
+                command_executor=os.getenv('SELENIUM_REMOTE_URL'),
+                options=chrome_options
+            )
+        else:
+            # Используем локальный ChromeDriver (ваш текущий подход)
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+    else:
+        # Локальная разработка
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+
     driver.implicitly_wait(10)
     driver.get(os.getenv('BASE_URL'))
 
     yield driver
     driver.quit()
-
 
 @pytest.fixture
 def login(browser) -> LoginPage:
