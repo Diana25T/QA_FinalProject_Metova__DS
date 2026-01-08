@@ -94,47 +94,35 @@ test_ui:
   stage: test_ui
   needs:
     - prepare_dependencies
-  before_script:
-    # Устанавливаем Google Chrome и зависимости
-    - apt-get update
-    - apt-get install -y wget gnupg
-
-    # Добавляем репозиторий Google Chrome
-    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
-
-    # Устанавливаем Chrome и зависимости
-    - apt-get update
-    - apt-get install -y google-chrome-stable xvfb libnss3 libgconf-2-4 libxss1
-
-    # Проверяем версию Chrome
-    - google-chrome --version
-
-  script:
-    # Активируем виртуальное окружение
-    - source venv/bin/activate
-
-    # Запускаем UI тесты с маркировкой 'ui' через xvfb
-    - echo "Запускаем UI тесты"
-    - xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
-
-    # Если есть падения, сохраняем скриншоты
-    - |
-      if [ -d "screenshots" ]; then
-        echo "Скриншоты найдены, сохраняем..."
-        mkdir -p screenshots-output
-        cp -r screenshots/* screenshots-output/ 2>/dev/null || true
-      fi
-
-  artifacts:
-    when: always
-    expire_in: 1 week
-    paths:
-      - allure-results-ui/
-      - screenshots-output/
-      - junit-ui.xml
-    reports:
-      junit: junit-ui.xml
+  test_ui:
+    stage: test_ui
+    image: python:3.11
+    before_script:
+      - apt-get update
+      - apt-get install -y wget gnupg curl unzip
+      # Установка Chrome для Debian 12+ (без apt-key)
+      - mkdir -p /etc/apt/keyrings
+      - wget -q -O /etc/apt/keyrings/google-chrome.gpg https://dl-ssl.google.com/linux/linux_signing_key.pub
+      - echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
+      - apt-get update
+      - apt-get install -y google-chrome-stable
+      # Установка зависимостей для Chrome в headless режиме
+      - apt-get install -y libxss1 libappindicator1 libindicator7 libasound2 libnspr4 libnss3 libx11-xcb1 libxcomposite1 libxcursor1 libxi6 libxtst6 fonts-liberation
+      - google-chrome --version
+      # Проверка установки ChromeDriver
+      - python -c "from webdriver_manager.chrome import ChromeDriverManager; print('ChromeDriver manager готов')"
+    script:
+      - source venv/bin/activate
+      - echo "Запускаем UI тесты на $BASE_URL"
+      - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
+    artifacts:
+      when: always
+      paths:
+        - allure-results-ui/
+        - screenshots-output/
+        - junit-ui.xml
+      reports:
+        junit: junit-ui.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
