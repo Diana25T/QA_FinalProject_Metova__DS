@@ -1,7 +1,9 @@
 import json
 import os
-from api.client import TandoorAPIClient
+
 from dotenv import load_dotenv
+
+from api.client import TandoorAPIClient
 
 load_dotenv()
 

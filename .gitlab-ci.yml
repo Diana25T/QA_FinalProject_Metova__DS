@@ -1,6 +1,6 @@
 # .gitlab-ci.yml
 # Используем образ Python
-image: python:3.11-slim
+image: python:3.11
 
 # Переменные, которые будут использоваться в пайплайне
 variables:
@@ -9,17 +9,13 @@ variables:
   TANDOOR_USERNAME: $TANDOOR_USERNAME
   TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
-  ALLURE_VERSION: "2.24.1"
 
-# Кэширование для ускорения сборок
+# Кэширование зависимостей Python для ускорения сборок
 cache:
-  key: "${CI_COMMIT_REF_SLUG}"
   paths:
     - .cache/pip
     - venv/
     - .wdm/
-    - .chrome/
-    - /opt/allure-$ALLURE_VERSION/
 
 # Определяем этапы выполнения пайплайна
 stages:
@@ -33,57 +29,36 @@ stages:
 prepare_dependencies:
   stage: prepare
   script:
-    # Обновляем систему и устанавливаем зависимости
-    - apt-get update && apt-get install -y --no-install-recommends 
-      wget 
-      curl 
-      gnupg 
-      ca-certificates 
-      default-jre-headless
-    - rm -rf /var/lib/apt/lists/*
+    # Устанавливаем Java (требуется для Allure)
+    - apt-get update
+    - apt-get install -y default-jre-headless wget unzip curl gnupg
 
     # Создаем виртуальное окружение Python
     - python -m venv venv
     - source venv/bin/activate
 
-    # Обновляем pip и устанавливаем зависимости из requirements.txt
+    # Обновляем pip и устанавливаем зависимости
     - pip install --upgrade pip
-    - if [ -f "requirements.txt" ]; then
-        pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt;
-      fi
+    - pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt
+    - pip install --upgrade pip
+    - pip install pytest pytest-html allure-pytest requests selenium webdriver-manager
 
-    # Устанавливаем основные пакеты для тестирования
-    - pip install --cache-dir=$PIP_CACHE_DIR 
-      pytest 
-      pytest-html 
-      allure-pytest 
-      requests 
-      selenium 
-      webdriver-manager 
-      pytest-xdist
-
-    # Устанавливаем Allure командной строки (только если еще не установлен)
-    - if [ ! -f "/opt/allure-$ALLURE_VERSION/bin/allure" ]; then
-        wget -q "https://github.com/allure-framework/allure2/releases/download/$ALLURE_VERSION/allure-$ALLURE_VERSION.tgz" &&
-        tar -xzf allure-$ALLURE_VERSION.tgz -C /opt/ &&
-        ln -sf /opt/allure-$ALLURE_VERSION/bin/allure /usr/local/bin/allure;
-      fi
+    # Устанавливаем Allure командной строки
+    - wget -q "https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz"
+    - tar -xzf allure-2.24.1.tgz -C /opt/
+    - ln -sf /opt/allure-2.24.1/bin/allure /usr/local/bin/allure
     - allure --version
-    - java --version
 
-    # Создаем директории для артефактов
-    - mkdir -p allure-results-api
-    - mkdir -p allure-results-ui
+    # Проверяем что Java установлена
+    - java --version
 
   artifacts:
     paths:
       - venv/
-      - /opt/allure-$ALLURE_VERSION/
     expire_in: 1 hour
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Этап 2: Запуск API тестов
 test_api:
@@ -94,32 +69,13 @@ test_api:
     # Активируем виртуальное окружение
     - source venv/bin/activate
 
-    # Выводим информацию о переменных (без полного токена в логах)
+    # Выводим информацию о переменных
     - echo "Запускаем API тесты на $BASE_URL"
-    - echo "Пользователь: $TANDOOR_USERNAME"
-    - echo "Токен установлен: ${TANDOOR_TOKEN:+yes}"
+    - echo "Пользователь:$TANDOOR_USERNAME"
+    - echo "Bearer Token (первые 10 символов):${TANDOOR_TOKEN:0:10}..."
 
-    # Проверяем существование тестов с маркером 'api'
-    - echo "Поиск API тестов..."
-    - pytest tests/ -m api --collect-only > /dev/null 2>&1 && echo "API тесты найдены" || echo "API тесты не найдены"
-
-    # Запускаем API тесты
-    - |
-      if pytest tests/ -m api --collect-only > /dev/null 2>&1; then
-        echo "Запуск API тестов..."
-        pytest tests/ -m api -v 
-          --alluredir=allure-results-api 
-          --junitxml=junit-api.xml 
-          --html=report-api.html 
-          --self-contained-html
-        TEST_EXIT_CODE=$?
-        echo "API тесты завершены с кодом: $TEST_EXIT_CODE"
-      else
-        echo "API тесты не найдены, пропускаем этап"
-        mkdir -p allure-results-api
-        touch allure-results-api/empty.txt
-        echo '<?xml version="1.0" encoding="utf-8"?><testsuites></testsuites>' > junit-api.xml
-      fi
+    # Запускаем API тесты с маркировкой 'api' и создаем JUnit отчет
+    - pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
 
   artifacts:
     when: always
@@ -127,13 +83,11 @@ test_api:
     paths:
       - allure-results-api/
       - junit-api.xml
-      - report-api.html
     reports:
       junit: junit-api.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Этап 3: Запуск UI тестов
 test_ui:
@@ -141,71 +95,35 @@ test_ui:
   needs:
     - prepare_dependencies
   before_script:
-    # Устанавливаем Chrome и зависимости
-    - apt-get update && apt-get install -y --no-install-recommends
-      wget
-      gnupg
-      ca-certificates
-      xvfb
-      libnss3
-      libgconf-2-4
-      libxss1
-      libgtk-3-0
-      libgbm-dev
-      fonts-liberation
-      libappindicator3-1
-      xdg-utils
-    - rm -rf /var/lib/apt/lists/*
+    # Устанавливаем Google Chrome и зависимости
+    - apt-get update
+    - apt-get install -y wget gnupg
 
-    # Устанавливаем Google Chrome
-    - wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-    - apt-get update && apt-get install -y /tmp/chrome.deb --no-install-recommends
-    - rm /tmp/chrome.deb
+    # Добавляем репозиторий Google Chrome
+    - wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+    - echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
+
+    # Устанавливаем Chrome и зависимости
+    - apt-get update
+    - apt-get install -y google-chrome-stable xvfb libnss3 libgconf-2-4 libxss1
+
+    # Проверяем версию Chrome
     - google-chrome --version
-    - which google-chrome
 
   script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
 
-    # Проверяем существование тестов с маркером 'ui'
-    - echo "Поиск UI тестов..."
-    - pytest tests/ -m ui --collect-only > /dev/null 2>&1 && echo "UI тесты найдены" || echo "UI тесты не найдены"
+    # Запускаем UI тесты с маркировкой 'ui' через xvfb
+    - echo "Запускаем UI тесты"
+    - xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
 
-    # Настраиваем переменные окружения для Chrome
-    - export DISPLAY=:99
-    - export CHROME_BIN=/usr/bin/google-chrome
-    - export CHROMEDRIVER_VERSION=$(curl -s https://chromedriver.storage.googleapis.com/LATEST_RELEASE)
-
-    # Запускаем Xvfb в фоновом режиме
-    - Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-    - sleep 3
-
-    # Запускаем UI тесты
+    # Если есть падения, сохраняем скриншоты
     - |
-      if pytest tests/ -m ui --collect-only > /dev/null 2>&1; then
-        echo "Запуск UI тестов..."
-        pytest tests/ -m ui -v 
-          --alluredir=allure-results-ui 
-          --junitxml=junit-ui.xml 
-          --html=report-ui.html 
-          --self-contained-html
-          -n 2  # Параллельный запуск 2 тестов
-        TEST_EXIT_CODE=$?
-        echo "UI тесты завершены с кодом: $TEST_EXIT_CODE"
-      else
-        echo "UI тесты не найдены, пропускаем этап"
-        mkdir -p allure-results-ui
-        touch allure-results-ui/empty.txt
-        echo '<?xml version="1.0" encoding="utf-8"?><testsuites></testsuites>' > junit-ui.xml
-      fi
-
-    # Копируем скриншоты, если они есть
-    - |
-      if find . -name "*.png" -o -name "*.jpg" 2>/dev/null | head -1; then
-        echo "Найдены скриншоты, сохраняем..."
+      if [ -d "screenshots" ]; then
+        echo "Скриншоты найдены, сохраняем..."
         mkdir -p screenshots-output
-        find . -name "*.png" -o -name "*.jpg" 2>/dev/null | xargs -I {} cp {} screenshots-output/ 2>/dev/null || true
+        cp -r screenshots/* screenshots-output/ 2>/dev/null || true
       fi
 
   artifacts:
@@ -213,78 +131,57 @@ test_ui:
     expire_in: 1 week
     paths:
       - allure-results-ui/
-      - junit-ui.xml
-      - report-ui.html
       - screenshots-output/
+      - junit-ui.xml
     reports:
       junit: junit-ui.xml
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_PIPELINE_SOURCE == "push"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Этап 4: Генерация отчета Allure
 generate_allure_report:
   stage: report
   needs:
-    - test_api
-    - test_ui
+    - job: test_api
+      artifacts: true
+    - job: test_ui
+      artifacts: true
   script:
     - echo "Генерация объединенного Allure отчета..."
+
+    # Проверяем что Java установлена
     - java --version
     - allure --version
 
-    # Создаем объединенную директорию для результатов
+    # Объединяем результаты API и UI тестов
     - mkdir -p allure-results-combined
 
     # Копируем результаты API тестов
-    - |
-      if [ -d "allure-results-api" ] && [ "$(ls -A allure-results-api 2>/dev/null)" ]; then
+    - if [ -d "allure-results-api" ]; then
         echo "Копируем результаты API тестов..."
         cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || true
-        echo "API результатов: $(find allure-results-api -type f 2>/dev/null | wc -l)"
       else
-        echo "Нет результатов API тестов"
+        echo "Директория allure-results-api не найдена"
       fi
 
     # Копируем результаты UI тестов
-    - |
-      if [ -d "allure-results-ui" ] && [ "$(ls -A allure-results-ui 2>/dev/null)" ]; then
+    - if [ -d "allure-results-ui" ]; then
         echo "Копируем результаты UI тестов..."
         cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || true
-        echo "UI результатов: $(find allure-results-ui -type f 2>/dev/null | wc -l)"
       else
-        echo "Нет результатов UI тестов"
+        echo "Директория allure-results-ui не найдена"
       fi
 
-    # Проверяем есть ли результаты для отчета
-    - |
-      if [ "$(find allure-results-combined -type f 2>/dev/null | wc -l)" -gt 0 ]; then
-        echo "Генерация Allure отчета из $(find allure-results-combined -type f 2>/dev/null | wc -l) файлов..."
-        allure generate allure-results-combined --clean -o public
-        
-        # Создаем index.html для GitLab Pages
-        cat > public/index.html << EOF
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Allure Test Report</title>
-            <meta http-equiv="refresh" content="0; url=./allure-report/index.html">
-        </head>
-        <body>
-            <p>Redirecting to <a href="./allure-report/index.html">Allure Report</a>...</p>
-        </body>
-        </html>
-        EOF
-      else
-        echo "Нет результатов тестов для генерации отчета"
-        mkdir -p public
-        echo "No test results available" > public/index.html
-      fi
+    # Генерируем HTML отчет
+    - echo "Содержимое allure-results-combined:"
+    - find allure-results-combined -type f 2>/dev/null | head -5 || echo "Директория пуста"
 
-    # Выводим информацию о сгенерированном отчете
-    - echo "Содержимое public/allure-report:"
-    - ls -la public/allure-report/ 2>/dev/null || echo "Отчет не сгенерирован"
+    - allure generate allure-results-combined --clean -o public
+
+    # Проверяем что отчет создан
+    - echo "Содержимое public:"
+    - ls -la public/
 
   artifacts:
     paths:
@@ -292,7 +189,7 @@ generate_allure_report:
     expire_in: 30 days
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Этап 5: Публикация отчета на GitLab Pages
 pages:
@@ -301,20 +198,9 @@ pages:
     - generate_allure_report
   script:
     - echo "Публикация Allure отчета на GitLab Pages..."
-    - echo "Отчет будет доступен по адресу: https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME/"
-
-    # Проверяем наличие отчета
-    - if [ -f "public/index.html" ]; then
-        echo "Отчет готов к публикации";
-      else
-        echo "Отчет не найден, создаем заглушку";
-        echo "Test reports will be available after successful pipeline run" > public/index.html;
-      fi
+    - echo "Отчет будет доступен по адресу:https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME"
   artifacts:
     paths:
       - public
   only:
-    - main
-    - master
-  variables:
-    GITLAB_PAGES_URL: "https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME"
+    - main  # Публикуем отчет только для ветки main

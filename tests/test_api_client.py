@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import allure
 import pytest
 
@@ -168,3 +170,29 @@ def test_remove_dublicate_recipes(api_client):
     # 6. Результаты
     print(f"Готово!Удалено: {deleted_count} дубликатов")
     print(f" Осталось {len(recipes) - deleted_count} уникальных рецептов")
+
+
+def test_get_token_only():
+    """Просто тестируем метод получения токена"""
+    from dotenv import load_dotenv
+    import os
+
+    load_dotenv()
+
+    # Создаем объект без вызова __init__
+    client = object.__new__(TandoorAPIClient)
+
+    # Устанавливаем только нужные атрибуты
+    client.base_url = os.getenv('BASE_URL')
+
+    # Вызываем только метод получения токена
+    token = client.get_tandoor_token(
+        os.getenv('TANDOOR_USERNAME'),
+        os.getenv('TANDOOR_PASSWORD')
+    )
+
+    if token:
+        print(f"✅ Токен получен: {token}")
+        print(f"Длина: {len(token)} символов")
+    else:
+        print("❌ Не удалось получить токен")

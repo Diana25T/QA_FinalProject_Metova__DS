@@ -1,7 +1,8 @@
 import os
+from typing import Dict, Optional, Any
+
 import allure
 import requests
-from typing import List, Dict, Optional, Any
 from dotenv import load_dotenv
 
 
@@ -49,27 +50,35 @@ class TandoorAPIClient:
         url = f"{self.base_url}/api/{endpoint}"
 
         try:
-            response = requests.request(method, url, headers=self.headers, **kwargs)
-            print(f"Запрос: {method} {url}")
-            print(f"Статус: {response.status_code}")
-            print("Ответ body:", response.text)
+            response = requests.request(method, url, headers=self.headers, timeout=30, **kwargs)
+            print(f"[API] Запрос: {method} {url}")
+            print(f"[API] Статус: {response.status_code}")
+            print(f"[API] Ответ: {response.text[:200]}...")
 
-            # Обработка ошибок
+            # Обработка ошибок HTTP (4xx, 5xx)
             if response.status_code >= 400:
                 return {
                     'status_code': response.status_code,
                     'content': response.text
                 }
 
-            # Успешный ответ
+            # Обработка успешного ответа
             if response.content:
-                return {
-                    'status_code': response.status_code,
-                    'json': response.json()
-                }
-
+                try:
+                    json_data = response.json()
+                    return {
+                        'status_code': response.status_code,
+                        'json': json_data
+                    }
+                except ValueError as e:
+                    # Если не удалось распарсить JSON, возвращаем текст
+                    print(f"Ошибка парсинга JSON: {e}")
+                    return {
+                        'status_code': response.status_code,
+                        'content': response.text
+                    }
             else:
-                # Если ответ пустой, возвращаем, None
+                # Если ответ пустой
                 return {
                     'status_code': response.status_code,
                     'json': None
@@ -79,10 +88,30 @@ class TandoorAPIClient:
             print(f"Ошибка запроса: {e}")
             return {'status_code': None, 'error': str(e)}
 
+    def get_tandoor_token(self, username=None, password=None):
+        """Получает токен напрямую через requests"""
+        username = username or os.getenv('TANDOOR_USERNAME')
+        password = password or os.getenv('TANDOOR_PASSWORD')
+
+        url = f"{self.base_url}/api-token-auth/"
+        data = {"username": username, "password": password}
+
+        try:
+            response = requests.post(url, data=data, timeout=30)
+            if response.status_code == 200:
+                token = response.json().get('token')
+                if token:
+                    self.token = token
+                    return token
+        except Exception as e:
+            print(f"Ошибка получения токена: {e}")
+
+        return None
+
 # === МЕТОДЫ ДЛЯ РЕЦЕПТОВ ===
 
     @allure.step("Импорт рецепта по URL: '{recipe_url}'")
-    def import_recipe_from_url(self, recipe_url: str) -> [Dict[str, Any]]:
+    def import_recipe_from_url(self, recipe_url: str)  -> Dict[str, Any]:
         """Импортирует рецепт по URL """
         data = {
             "url": recipe_url,
@@ -102,7 +131,7 @@ class TandoorAPIClient:
     @allure.step("Получить рецепт по ID = {recipe_id}")
     def get_recipe_by_id(self, recipe_id: int)  -> Dict[str, Any]:
         """Получает рецепт по ID"""
-        return self._make_request('GET', f'recipe/{recipe_id}/related/')
+        return self._make_request('GET', f'recipe/{recipe_id}/')
 
     @allure.step("Создать рецепт с данными")
     def create_recipe(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,18 +143,30 @@ class TandoorAPIClient:
         """Удаляет рецепт по ID"""
 
         response = self._make_request('DELETE', f'recipe/{recipe_id}/')
-        if response is None:
-            print(f"Ошибка: не получили ответ сервера для рецепта {recipe_id}")
+        if response.get('status_code') is None:
+            print(f"Ошибка сети для рецепта {recipe_id}: {response.get('error')}")
             return False
+
+        status_code = response.get('status_code')
+        print(f"Статус код ответа: {status_code}")
+
         # Смотрим статус код
         status_code = response.get('status_code')
         print(f"Статус код ответа : {status_code}")
 
         # Если статус код 204 - успешно удалено
-        if status_code == 204 or status_code == 404:
-            print(f"УСПЕХ: Рецепт {recipe_id} удален")
+        if status_code == 204:
+            print(f"Рецепт {recipe_id} успешно удален")
             return True
-        return False  # Если статус не 204/404
+        elif status_code == 404:
+            print(f"Рецепт {recipe_id} не найден (уже удален или не существовал)")
+            return True # Так как в фикстура создает и удалеет рецепты
+        else:
+            # Выводим дополнительную информацию
+            error_content = response.get('content')
+            if error_content:
+                print(f"Ошибка удаления рецепта {recipe_id}: {error_content}")
+            return False
 
 
 # === МЕТОДЫ ДЛЯ ПЛАНОВ ПИТАНИЯ ===
@@ -224,24 +265,17 @@ class TandoorAPIClient:
 
     @allure.step("Проверка соединения с API.Пытается получить список рецептов.")
     def test_connection(self) -> bool:
-        """
-        Простая проверка соединения с API.
-        Пытается получить список рецептов.
-        """
-        print("Проверяю соединение с API...")
+        """Проверяет соединение с API."""
+        print(" Проверяю соединение API...")
 
-        try:
-            # Пробуем получить рецепты
-            result = self.get_recipes()
+        result = self.get_recipes()
+        status_code = result.get('status_code')
 
-            if result and result.get('status_code') == 200:
-                count = result.get('json', {}).get('count', 0)
-                print(f" Соединение установлено! Рецептов в системе: {count}")
-                return True
-            else:
-                print(f" Ошибка. Статус: {result.get('status_code')}")
-                return False
-
-        except Exception as e:
-            print(f" Ошибка соединения: {e}")
+        if status_code == 200:
+            count = result.get('json', {}).get('count', 0)
+            print(f" API Соединение установлено! Рецептов: {count}")
+            return True
+        else:
+            error_msg = "Ошибка сети" if status_code is None else f"Статус: {status_code}"
+            print(f"API {error_msg}")
             return False
