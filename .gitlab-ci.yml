@@ -8,6 +8,9 @@ variables:
   TANDOOR_TOKEN: $TANDOOR_TOKEN
   TANDOOR_USERNAME: $TANDOOR_USERNAME
   TANDOOR_PASSWORD: $TANDOOR_PASSWORD
+  POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+  SECRET_KEY: $SECRET_KEY
+
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"  # Для использования services
   CI: "true"  # Обязательно установите это для фикстуры
@@ -42,7 +45,16 @@ prepare_dependencies:
     - apt-get update
     - apt-get install -y default-jre-headless wget unzip curl gnupg
 
-    #  Устанавливаем Docker Compose
+     # Устанавливаем Docker клиент
+    - echo "Установка Docker клиента..."
+    - apt-get install -y ca-certificates curl gnupg lsb-release
+    - mkdir -p /etc/apt/keyrings
+    - curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+    - apt-get update
+    - apt-get install -y docker-ce-cli
+
+    # Устанавливаем Docker Compose
     - echo "Установка Docker Compose..."
     - curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     - chmod +x /usr/local/bin/docker-compose
@@ -88,52 +100,76 @@ deploy_application:
     - export DOCKER_HOST="tcp://docker:2375"
     - export DOCKER_TLS_CERTDIR=""
 
-    # Проверяем Docker
+       # Проверяем что Docker установлен
     - docker --version
     - docker-compose --version
 
-    # Проверяем существующий .env файл
-    - echo "Проверяем наличие .env файла..."
-    - |
-      if [ -f .env ]; then
-        echo ".env файл найден"
-        # Добавляем CI переменные если их нет
-        if ! grep -q "^DEBUG=" .env; then
-          echo "DEBUG=$DEBUG_VALUE" >> .env
-        fi
-        if ! grep -q "^ALLOWED_HOSTS=" .env; then
-          echo "ALLOWED_HOSTS=$ALLOWED_HOSTS_VALUE" >> .env
-        fi
-      else
-        echo "Внимание: .env файл не найден..."
+    # Настраиваем соединение с Docker daemon
+    - export DOCKER_HOST="tcp://docker:2375"
+    - export DOCKER_TLS_CERTDIR=""
 
-       # Запускаем приложение
+    # Проверяем связь с Docker daemon
+    - docker info || echo "Не удалось подключиться к Docker daemon"
+
+     # СОЗДАЕМ .env:
+    - |
+      cat > .env << 'EOF'
+      # Django settings
+      SECRET_KEY=${SECRET_KEY}
+      DEBUG=True
+      ALLOWED_HOSTS=*,localhost,web_recipes
+      CSRF_TRUSTED_ORIGINS=http://localhost,http://web_recipes
+      
+      # Database settings
+      DB_ENGINE=django.db.backends.postgresql
+      POSTGRES_HOST=db_recipes
+      POSTGRES_PORT=5432
+      POSTGRES_USER=djangodb
+      POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      POSTGRES_DB=djangodb
+      EOF
+
+    # Проверяем что файл создан (без паролей)
+    - echo "Создан .env файл:"
+    - grep -v "PASSWORD\|SECRET_KEY" .env
+
+    # Запускаем приложение
     - echo "Запускаем docker-compose up..."
     - docker-compose up -d
 
-    # Ждем запуска приложения
-    - echo "Ожидание запуска приложения..."
+     # Ждем запуска приложения
+    - echo "Ожидание запуска приложения (макс 3 минуты)..."
     - |
-      timeout 120 bash -c '
-        attempt=1
-        until curl -s -f http://localhost:80 > /dev/null || [ $attempt -gt 24 ]; do
-          echo "Попытка $attempt: приложение не отвечает..."
-          sleep 5
-          attempt=$((attempt+1))
-        done
-        if [ $attempt -gt 24 ]; then
-          echo "Таймаут! Приложение не запустилось"
-          docker-compose logs
-          exit 1
+      for i in {1..36}; do
+        if curl -s -f http://localhost:80 > /dev/null 2>&1; then
+          echo " Приложение запущено после $i попыток!"
+          break
         fi
-        echo "Приложение успешно запущено!"
-      '
+        echo "Попытка $i/36: ждем 5 секунд..."
+        sleep 5
+        
+        # Каждые 30 секунд показываем логи
+        if [ $((i % 6)) -eq 0 ]; then
+          echo "--- Текущие логи ---"
+          docker-compose logs --tail=5
+          echo "-------------------"
+        fi
+      done
+      
+      if [ $i -eq 36 ]; then
+        echo "✗ Таймаут! Приложение не запустилось за 3 минуты"
+        echo "--- Полные логи ---"
+        docker-compose logs
+        echo "-----------------"
+        exit 1
+      fi
 
-    # ДОБАВЛЕНО: Проверяем статус
+    # Проверяем статус
     - echo "Статус контейнеров:"
     - docker-compose ps
-    - echo "Проверка доступности:"
-    - curl -s -o /dev/null -w "HTTP статус:%{http_code}\n" http://localhost:80
+    - echo "Проверка доступности приложения:"
+    - curl -s -o /dev/null -w "HTTP статус:%{http_code}\n" http://localhost:80 || echo "Запрос не удался"
+
 
 # Этап 2: Запуск API тестов
 test_api:
