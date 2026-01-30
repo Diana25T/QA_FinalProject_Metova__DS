@@ -91,22 +91,25 @@ prepare_dependencies:
 # Этап 2:  Запуск приложения в Docker
 deploy_application:
   stage: deploy_app
+  image: docker:latest
+  services:
+    - docker:dind
   needs:
     - prepare_dependencies
   script:
     - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ В DOCKER ==="
 
-    # Настраиваем Docker окружение
-    - export DOCKER_HOST="tcp://docker:2375"
-    - export DOCKER_TLS_CERTDIR=""
-
-       # Проверяем что Docker установлен
-    - docker --version
+    # Устанавливаем Docker Compose (в docker:latest его нет)
+    - apk add --no-cache py3-pip  #  в docker:latest используется apk, не apt-get!
+    - pip3 install docker-compose
     - docker-compose --version
 
-    # Настраиваем соединение с Docker daemon
+    # Настраиваем Docker
     - export DOCKER_HOST="tcp://docker:2375"
     - export DOCKER_TLS_CERTDIR=""
+
+    # Проверяем связь
+    - docker info || echo "Предупреждение:не удалось подключиться к Docker daemon"
 
     # Проверяем связь с Docker daemon
     - docker info || echo "Не удалось подключиться к Docker daemon"
