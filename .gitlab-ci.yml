@@ -11,6 +11,7 @@ variables:
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"  # Для использования services
   CI: "true"  # Обязательно установите это для фикстуры
+  DOCKER_COMPOSE_VERSION: "1.29.2"
 
 # Кэширование зависимостей Python для ускорения сборок
 cache:
@@ -19,12 +20,18 @@ cache:
     - venv/
     - .wdm/
 
+#Сервис Docker-in-Docker для запуска контейнеров
+services:
+  - docker:dind
+
 # Определяем этапы выполнения пайплайна
 stages:
   - prepare
+  - deploy_app # Этап запуска приложения
   - test_api
   - test_ui
   - report
+  - cleanup  # Этап очистки
   - deploy
 
 # Этап 1: Подготовка зависимостей и окружения
@@ -35,6 +42,12 @@ prepare_dependencies:
     - apt-get update
     - apt-get install -y default-jre-headless wget unzip curl gnupg
 
+    #  Устанавливаем Docker Compose
+    - echo "Установка Docker Compose..."
+    - curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    - chmod +x /usr/local/bin/docker-compose
+    - docker-compose --version
+
     # Создаем виртуальное окружение Python
     - python -m venv venv
     - source venv/bin/activate
@@ -43,6 +56,7 @@ prepare_dependencies:
     - pip install --upgrade pip
     - pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt
     - pip install pytest pytest-html allure-pytest requests selenium webdriver-manager
+
 
     # Устанавливаем Allure командной строки
     - wget -q "https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz"
@@ -62,19 +76,84 @@ prepare_dependencies:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+# Этап 2:  Запуск приложения в Docker
+deploy_application:
+  stage: deploy_app
+  needs:
+    - prepare_dependencies
+  script:
+    - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ В DOCKER ==="
+
+    # Настраиваем Docker окружение
+    - export DOCKER_HOST="tcp://docker:2375"
+    - export DOCKER_TLS_CERTDIR=""
+
+    # Проверяем Docker
+    - docker --version
+    - docker-compose --version
+
+    # Проверяем существующий .env файл
+    - echo "Проверяем наличие .env файла..."
+    - |
+      if [ -f .env ]; then
+        echo ".env файл найден"
+        # Добавляем CI переменные если их нет
+        if ! grep -q "^DEBUG=" .env; then
+          echo "DEBUG=$DEBUG_VALUE" >> .env
+        fi
+        if ! grep -q "^ALLOWED_HOSTS=" .env; then
+          echo "ALLOWED_HOSTS=$ALLOWED_HOSTS_VALUE" >> .env
+        fi
+      else
+        echo "Внимание: .env файл не найден..."
+
+       # Запускаем приложение
+    - echo "Запускаем docker-compose up..."
+    - docker-compose up -d
+
+    # Ждем запуска приложения
+    - echo "Ожидание запуска приложения..."
+    - |
+      timeout 120 bash -c '
+        attempt=1
+        until curl -s -f http://localhost:80 > /dev/null || [ $attempt -gt 24 ]; do
+          echo "Попытка $attempt: приложение не отвечает..."
+          sleep 5
+          attempt=$((attempt+1))
+        done
+        if [ $attempt -gt 24 ]; then
+          echo "Таймаут! Приложение не запустилось"
+          docker-compose logs
+          exit 1
+        fi
+        echo "Приложение успешно запущено!"
+      '
+
+    # ДОБАВЛЕНО: Проверяем статус
+    - echo "Статус контейнеров:"
+    - docker-compose ps
+    - echo "Проверка доступности:"
+    - curl -s -o /dev/null -w "HTTP статус:%{http_code}\n" http://localhost:80
+
 # Этап 2: Запуск API тестов
 test_api:
   stage: test_api
   needs:
     - prepare_dependencies
+    - deploy_application # Зависимость от запущенного приложения
   script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
 
     # Выводим информацию о переменных
-    - echo "Запускаем API тесты на $BASE_URL"
+    - echo "Запускаем API тесты на ЛОКАЛЬНОМ приложении $BASE_URL"
     - echo "Пользователь:$TANDOOR_USERNAME"
     - echo "Bearer Token (первые 10 символов):${TANDOOR_TOKEN:0:10}..."
+    - echo "Приложение запущено в Docker контейнере"
+
+    #  Проверяем доступность приложения перед тестами
+    - echo "Проверка доступности приложения..."
+    - curl -s -f http://localhost:80 > /dev/null && echo "✓ Приложение доступно" || echo "✗ Приложение недоступно"
 
     # Запускаем API тесты с маркировкой 'api' и создаем JUnit отчет
     - pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
@@ -91,7 +170,7 @@ test_api:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 3: Запуск UI тестов (используем Selenium как сервис)
+# Этап 4: Запуск UI тестов
 test_ui:
   stage: test_ui
   image: python:3.11  # Используем Python образ, а не Selenium
@@ -104,6 +183,7 @@ test_ui:
     CI: "true"
   needs:
     - prepare_dependencies
+    - deploy_application  # Зависимость от запущенного приложения
   before_script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
@@ -111,10 +191,25 @@ test_ui:
     - sleep 10  # Даем время Selenium запуститься
     # Проверяем доступность Selenium
     - curl -s http://selenium-standalone-chrome:4444/wd/hub/status|grep '"ready":true' || echo "Selenium не готов"
+
+    #  Проверяем доступность приложения
+    - echo "Проверка доступности приложения для UI тестов..."
+    - |
+       for i in {1..10}; do
+        if curl -s -f http://localhost:80 > /dev/null; then
+          echo " Приложение доступно после $i попыток"
+          break
+        fi
+        echo " Попытка $i: Приложение недоступно"
+        sleep 3
+      done
   script:
-    - echo "Запускаем UI тесты на $BASE_URL"
-    - echo "Используем Selenium по адресу:$SELENIUM_REMOTE_URL"
-    - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
+    # Выводим информацию о локальном тестировании
+    - echo "Запускаем UI тесты на ЛОКАЛЬНОМ приложении $BASE_URL"
+    - echo "Используем Selenium по адресу $SELENIUM_REMOTE_URL"
+
+    # Запускаем UI тесты с локальным URL
+    - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml --base-url=$BASE_URL
   artifacts:
     when: always
     paths:
@@ -127,7 +222,7 @@ test_ui:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 4: Генерация отчета Allure
+# Этап 5: Генерация отчета Allure
 generate_allure_report:
   stage: report
   needs:
@@ -179,7 +274,20 @@ generate_allure_report:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 5: Публикация отчета на GitLab Pages
+# Этап 6: остановка контейнеров
+cleanup:
+  stage: cleanup
+  needs:
+    - test_api
+    - test_ui
+  script:
+    - echo "Остановка Docker контейнеров..."
+    - docker-compose down -v || true
+    - echo "Очистка Docker системы..."
+    - docker system prune -f || true
+  when: always  # Всегда выполняем очистку
+
+# Этап 6: Публикация отчета на GitLab Pages
 pages:
   stage: deploy
   dependencies:
