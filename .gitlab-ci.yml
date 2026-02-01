@@ -167,16 +167,16 @@ deploy_application:
     - docker-compose up -d
 
     # Проверка подключения к базе данных
-     echo "Проверяем подключение к базе данных..."
+    - echo "Проверяем подключение к базе данных..."
      for i in $(seq 1 30); do
        if docker-compose exec -T db_recipes psql -U djangodb -d djangodb -c "SELECT 1;" 2>/dev/null; then
      echo "✓ Подключение к базе данных успешно"
      break
      fi
-     echo "Попытка $i/30:База данных не готова..."
+    - echo "Попытка $i/30:База данных не готова..."
 
     # Показываем ошибки подключения
-     docker-compose logs db_recipes --tail=1 2>/dev/null | grep -i "FATAL\|ERROR\|authentication" || true
+    - docker-compose logs db_recipes --tail=1 2>/dev/null | grep -i "FATAL\|ERROR\|authentication" || true
     
      sleep 2
      done
