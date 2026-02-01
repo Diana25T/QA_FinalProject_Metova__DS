@@ -289,6 +289,8 @@ deploy_application:
 
     # Проверяем что nginx отвечает
     - curl -I http://localhost:80 || echo "nginx не отвечает"
+    - echo "=== ПРОВЕРКА ДОСТУПНОСТИ ИЗНУТРИ DOCKER ==="
+    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -o /dev/null -w "%{http_code}" http://web_recipes:80 && echo "✓ Доступен изнутри Docker сети" || echo "✗ Не доступен изнутри Docker сети"
 
 # Этап 2: Запуск API тестов
 test_api:
