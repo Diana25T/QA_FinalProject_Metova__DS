@@ -153,10 +153,6 @@ deploy_application:
       echo "  Пароль установлен (длина: ${#POSTGRES_PASSWORD} символов)"
       fi
 
-    # Проверяем docker-compose.yml
-    - echo "4. Пароль в docker-compose.yml:"
-    - grep -A2 -B2 "POSTGRES_PASSWORD" docker-compose.yml
-
     # Проверяем невидимые символы
     - echo "5. Проверка на невидимые символы (hex dump):"
     - echo "GitLab переменная:" && echo -n "${POSTGRES_PASSWORD}" | xxd
@@ -171,16 +167,25 @@ deploy_application:
     - docker-compose up -d
 
     # Проверка подключения к базе данных
-    - echo "Проверяем подключение к базе данных..."
-    - |
-    - for i in {1..30}; do
-    - if docker-compose exec -T db_recipes psql -U djangodb -d djangodb -c "SELECT 1;" 2>/dev/null; then
-    - echo "✓ Подключение к базе данных успешно"
-    - break
-    - fi
-    - echo "Попытка $i/30:База данных не готова..."
-    - sleep 2
-    - done
+     echo "Проверяем подключение к базе данных..."
+     for i in $(seq 1 30); do
+       if docker-compose exec -T db_recipes psql -U djangodb -d djangodb -c "SELECT 1;" 2>/dev/null; then
+     echo "✓ Подключение к базе данных успешно"
+     break
+     fi
+     echo "Попытка $i/30:База данных не готова..."
+
+    # Показываем ошибки подключения
+     docker-compose logs db_recipes --tail=1 2>/dev/null | grep -i "FATAL\|ERROR\|authentication" || true
+    
+     sleep 2
+     done
+
+     if [ $i -eq 30 ]; then
+     echo "✗ Не удалось подключиться к базе данных за 60 секунд"
+     echo "Логи базы данных:"
+     docker-compose logs db_recipes
+     fi
 
      # Ждем запуска приложения
     - echo "Ожидание запуска приложения (макс 3 минуты)..."
@@ -226,13 +231,69 @@ deploy_application:
     - echo "Проверка доступности приложения:"
     - curl -s -o /dev/null -w "HTTP статус:%{http_code}\n" --max-time 5 http://localhost:80 || echo "Запрос не удался (таймаут 5 сек)"
 
+    - echo "=== Подробная диагностика ==="
+
+    # 1. Проверяем сеть
+    - echo "1. Проверка сети:"
+    - |
+      docker network inspect qa_finalproject_metova_default --format='{{json .Containers}}' | jq -r 'to_entries[] | "  \(.key): \(.value.Name) - IP: \(.value.IPv4Address)"' 2>/dev/null || echo "  (jq не установлен, пропускаем)"
+
+    # 2. Проверяем, что контейнеры общаются
+    - echo "2. Проверка связи между контейнерами:"
+    - |
+      docker exec qa_finalproject_metova-web_recipes-1 sh -c "ping -c 1 db_recipes > /dev/null && echo '  ✓ Web может связаться с БД' || echo '  ✗ Web НЕ может связаться с БД'"
+
+    # 3. Проверяем порты внутри контейнера web
+    - echo "3. Проверка портов в контейнере web:"
+    - |
+      docker exec qa_finalproject_metova-web_recipes-1 sh -c "netstat -tlnp 2>/dev/null | grep :80 || ss -tlnp 2>/dev/null | grep :80 || echo '  Порт 80 не слушает внутри контейнера'"
+
+    # 4. Проверяем логи веб-приложения
+    - echo "4. Логи веб-приложения:"
+    - docker-compose logs web_recipes --tail=10
+
+    # 5. Проверяем nginx/gunicorn (если используется)
+    - echo "5. Проверка процессов в веб-контейнере:"
+    - |
+      docker exec qa_finalproject_metova-web_recipes-1 ps aux | grep -E "nginx|gunicorn|python|django" | head -5
+
+    # 6. Альтернативная проверка доступности
+    - echo "6. Альтернативные проверки:"
+    - |
+      # Проверяем изнутри контейнера
+      echo "  - Проверка изнутри контейнера web:"
+      docker exec qa_finalproject_metova-web_recipes-1 sh -c "curl -s -o /dev/null -w '  Внутренний статус: %{http_code}\n' http://localhost:80 || echo '  Внутренний запрос не удался'"
+
+      # Проверяем порт снаружи
+      echo "  - Проверка порта 80 снаружи:"
+      if nc -z -w 2 localhost 80; then
+        echo "  ✓ Порт 80 открыт"
+        # Пробуем получить заголовки
+        echo "  - Заголовки ответа:"
+        curl -I --max-time 5 http://localhost:80 2>&1 | head -5 || echo "  Не удалось получить заголовки"
+      else
+        echo "  ✗ Порт 80 закрыт"
+      fi
+
+    # Проверяем логи
+    - echo "Логи db_recipes:"
+    - docker-compose logs db_recipes --tail=20
+
+    # Проверяем доступность порта 80
+    - echo "Проверка порта 80:"
+    - timeout 10 bash -c "until nc -z localhost 80; do sleep 1; echo 'Ждем порт 80...'; done" || echo "Порт 80 не открыт"
+
+    # Проверяем что nginx отвечает
+    - curl -I http://localhost:80 || echo "nginx не отвечает"
 
 # Этап 2: Запуск API тестов
 test_api:
   stage: test_api
   needs:
-    - prepare_dependencies
-    - deploy_application # Зависимость от запущенного приложения
+    - job: prepare_dependencies
+      artifacts: true
+    - job: deploy_application  # Зависимость от запущенного приложения
+      artifacts: false
   script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
