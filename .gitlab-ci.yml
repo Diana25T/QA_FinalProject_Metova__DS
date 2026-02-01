@@ -153,7 +153,7 @@ deploy_application:
       MAX_RETRIES=30
       for i in $(seq 1 $MAX_RETRIES); do
         echo "Попытка $i/$MAX_RETRIES: Проверка готовности БД..."
-        if docker-compose exec -T db_recipes pg_isready -U ${POSTGRES_USER}; then
+        if docker-compose exec -T db_recipes pg_isready -U djangodb; then
           echo "✓ База данных готова"
           break
         fi
@@ -164,7 +164,7 @@ deploy_application:
         fi
       done
 
-    # === ВСТАВИТЬ НОВЫЙ КОД ЗДЕСЬ ===
+    # === Ожидание запуска приложения ===
     - |
       echo "Ожидание запуска приложения..."
       MAX_WAIT=240  # Увеличиваем время для Tandoor (ему нужно больше)
@@ -209,7 +209,11 @@ deploy_application:
               exit 1
           fi
       done
-    - echo "✓ Приложение успешно развернуто!"
+    - echo " Приложение успешно развернуто!"
+    - echo "Проверка состояния контейнеров..."
+    - docker-compose ps
+    - echo "Сетевые подключения..."
+    - docker network inspect qa_finalproject_metova_default 2>/dev/null || echo "Сеть не найдена"
     - WEB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qa_finalproject_metova-web_recipes-1 2>/dev/null || echo "не_найден")
     - echo "APP_URL=http://${WEB_IP}:80" > deploy.env
     - echo "BASE_URL=http://web_recipes:80" >> deploy.env
