@@ -147,79 +147,68 @@ deploy_application:
     - echo "Запуск docker-compose up..."
     - docker-compose up -d
 
-    # Ожидание запуска БД
+     # Ожидание готовности базы данных.
     - echo "Ожидание готовности базы данных..."
     - |
       MAX_RETRIES=30
-      DB_READY=false
-      
       for i in $(seq 1 $MAX_RETRIES); do
         echo "Попытка $i/$MAX_RETRIES: Проверка готовности БД..."
-        
-        # Используем pg_isready
-        if docker-compose exec -T db_recipes pg_isready -U djangodb -d djangodb 2>/dev/null; then
+        if docker-compose exec -T db_recipes pg_isready -U ${POSTGRES_USER}; then
           echo "✓ База данных готова"
-          DB_READY=true
           break
         fi
-        
-        # Проверяем логи (на всякий случай)
-        if docker-compose logs db_recipes 2>&1 | tail -5 | grep -q "ready to accept connections"; then
-          echo "✓ База данных готова (по логам)"
-          DB_READY=true
-          break
-        fi
-        
         sleep 2
-      done
-      
-      if [ "$DB_READY" = "false" ]; then
-        echo "✗ База данных не готова за $((MAX_RETRIES * 2)) секунд"
-        echo "Логи базы данных:"
-        docker-compose logs db_recipes
-        exit 1
-      fi
-
-    # Ожидание запуска приложения
-    - echo "Ожидание запуска приложения..."
-    - |
-      MAX_WAIT=180
-      WAITED=0
-      
-      while [ $WAITED -lt $MAX_WAIT ]; do
-        # Проверяем API endpoint
-        if docker run --network ${CI_PROJECT_NAME}_default --rm curlimages/curl \
-          --max-time 10 --retry 0 --silent \
-          --output /dev/null --fail "http://web_recipes:80/api/" 2>/dev/null; then
-          echo "✓ API приложения доступно!"
-          break
-        fi
-        
-        # Проверяем, не "умерло" ли приложение
-        if ! docker-compose ps web_recipes | grep -q "Up"; then
-          echo "✗ Контейнер приложения упал!"
-          docker-compose logs web_recipes
+        if [ $i -eq $MAX_RETRIES ]; then
+          echo "✗ База данных не готова за $MAX_RETRIES попыток"
           exit 1
         fi
-        
-        WAITED=$((WAITED + 5))
-        echo "Ожидание... ($WAITED/$MAX_WAIT сек.)"
-        sleep 5
-        
-        # Показываем прогресс каждые 30 секунд
-        if [ $((WAITED % 30)) -eq 0 ]; then
-          echo "--- Текущие логи приложения (последние 5 строк) ---"
-          docker-compose logs --tail=5 web_recipes 2>/dev/null || true
-        fi
       done
-      
-      if [ $WAITED -ge $MAX_WAIT ]; then
-        echo "✗ Приложение не запустилось за $MAX_WAIT секунд"
-        echo "=== ПОЛНЫЕ ЛОГИ ПРИЛОЖЕНИЯ ==="
-        docker-compose logs web_recipes
-        exit 1
-      fi
 
+    # === ВСТАВИТЬ НОВЫЙ КОД ЗДЕСЬ ===
+    - |
+      echo "Ожидание запуска приложения..."
+      MAX_WAIT=240  # Увеличиваем время для Tandoor (ему нужно больше)
+      WAIT_INTERVAL=5
+      for i in $(seq 1 $((MAX_WAIT/WAIT_INTERVAL))); do
+          # Пробуем сделать HTTP запрос к приложению на порту 80
+          if curl -f -s -o /dev/null -m 5 http://localhost:80/ || \
+             curl -f -s -o /dev/null -m 5 http://web_recipes:80/ || \
+             curl -f -s -o /dev/null -m 5 http://127.0.0.1:80/; then
+              echo "✓ Приложение запущено и отвечает"
+              break
+          fi
+      
+          echo "Ожидание... ($((i*WAIT_INTERVAL))/$MAX_WAIT сек.)"
+      
+          # Выводим логи для диагностики
+          echo "--- Текущие логи приложения (последние 3 строки) ---"
+          docker-compose logs --tail=3 web_recipes 2>/dev/null || true
+      
+          sleep $WAIT_INTERVAL
+      
+          if [ $((i*WAIT_INTERVAL)) -ge $MAX_WAIT ]; then
+              echo "✗ Приложение не запустилось за $MAX_WAIT секунд"
+      
+              # Дополнительная диагностика
+              echo "=== ДИАГНОСТИКА ==="
+              echo "1. Состояние контейнеров:"
+              docker-compose ps
+      
+              echo "2. Логи веб-контейнера:"
+              docker-compose logs web_recipes
+      
+              echo "3. Проверка процессов в контейнере:"
+              docker-compose exec -T web_recipes ps aux || true
+      
+              echo "4. Проверка сетевых интерфейсов:"
+              docker-compose exec -T web_recipes ifconfig || ip addr || true
+      
+              echo "5. Проверка открытых портов:"
+              docker-compose exec -T web_recipes netstat -tlnp 2>/dev/null || echo "netstat недоступен"
+      
+              exit 1
+          fi
+      done
     - echo "✓ Приложение успешно развернуто!"
     - WEB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qa_finalproject_metova-web_recipes-1 2>/dev/null || echo "не_найден")
     - echo "APP_URL=http://${WEB_IP}:80" > deploy.env
@@ -231,6 +220,8 @@ deploy_application:
     paths:
       - .env
       - docker-compose.yml
+      - deploy.env
+      - docker_logs.txt
     expire_in: 1 week
   rules:
       - if: '$CI_MERGE_REQUEST_ID'
