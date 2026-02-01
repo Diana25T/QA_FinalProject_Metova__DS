@@ -293,30 +293,59 @@ deploy_application:
 # Этап 3: Запуск API тестов
 test_api:
   stage: test_api
+  image: python:3.11  # Используем Python образ
+  services:
+    - docker:dind
   variables:
-     BASE_URL: "http://web_recipes:80"
+    BASE_URL: "http://localhost:80"  # Используем localhost (порт проброшен)
   needs:
     - job: prepare_dependencies
       artifacts: true
-    - job: deploy_application  # Зависимость от запущенного приложения
+    - job: deploy_application
       artifacts: true
-  script:
+  before_script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
 
-    # Выводим информацию о переменных
-    - echo "Запускаем API тесты на ЛОКАЛЬНОМ приложении $BASE_URL"
+    # Устанавливаем curl если его нет
+    - apt-get update && apt-get install -y curl
+
+    # Проверяем доступность через localhost
+    - |
+      echo "Проверка доступности через localhost..."
+      for i in {1..10}; do
+          if curl -s -f http://localhost:80 > /dev/null; then
+              echo "✓ Приложение доступно"
+              break
+          fi
+          echo "Попытка $i: недоступно"
+          sleep 3
+          
+          if [ $i -eq 10 ]; then
+              echo "✗ Приложение недоступно после 10 попыток"
+              echo "Диагностика:"
+              echo "1. Проверка Docker контейнеров:"
+              docker ps 2>/dev/null || echo "Docker недоступен"
+              echo "2. Проверка портов:"
+              netstat -tln 2>/dev/null || ss -tln 2>/dev/null || echo "Утилиты проверки портов недоступны"
+              exit 1
+          fi
+      done
+  script:
+    - echo "Запускаем API тесты на $BASE_URL"
     - echo "Пользователь:$TANDOOR_USERNAME"
-    - echo "Bearer Token (первые 10 символов):${TANDOOR_TOKEN:0:10}..."
-    - echo "Приложение запущено в Docker контейнере"
 
-    #  Проверяем доступность приложения перед тестами
-    - echo "Проверка доступности приложения..."
-    - curl -s -f http://web_recipes:80 > /dev/null && echo "✓ Приложение доступно" || echo "✗ Приложение недоступно"
+    # Проверяем, что тестовый модуль существует
+    - |
+      if [ -f "tests/test_api.py" ] || [ -d "tests" ]; then
+          echo "Тестовые файлы найдены"
+      else
+          echo "✗ Тестовые файлы не найдены"
+          exit 1
+      fi
 
-    # Запускаем API тесты с маркировкой 'api' и создаем JUnit отчет
-    - pytest tests/ -m api -v --base-url=$BASE_URL --alluredir=allure-results-api --junitxml=junit-api.xml
-
+    # Запускаем тесты БЕЗ --base-url (используем переменную окружения)
+    - pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
   artifacts:
     when: always
     expire_in: 1 week
