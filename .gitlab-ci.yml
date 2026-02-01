@@ -166,11 +166,23 @@ deploy_application:
     - echo "Запускаем docker-compose up..."
     - docker-compose up -d
 
-    # После docker-compose up -d
-    # ПОСЛЕ docker-compose up -d добавьте:
-
     - echo "Ждем полного запуска приложения..."
     - sleep 30
+
+    # Получение IP контейнера
+
+    - echo "Получаем IP адрес контейнера:"
+    - WEB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qa_finalproject_metova-web_recipes-1)
+    - echo "IP адрес web_recipes:$WEB_IP"
+
+    - echo "Проверяем доступность по IP:"
+    - if docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -f http://${WEB_IP}:80 > /dev/null; then
+    - echo "✓ Приложение доступно по IP:$WEB_IP"
+    - echo "APP_URL=http://${WEB_IP}:80" > deploy.env
+      else
+      echo "✗ Приложение недоступно"
+      exit 1
+      fi
 
     - echo "=== ПРОВЕРКА ДОСТУПНОСТИ ==="
 
