@@ -135,6 +135,20 @@ deploy_application:
       POSTGRES_DB=djangodb
       EOF
 
+    - echo "2. Содержимое .env файла:"
+    - cat .env
+
+    - echo "3. Пароль из .env файла:'$(grep POSTGRES_PASSWORD .env | cut -d= -f2)'"
+
+    # Проверяем docker-compose.yml
+    - echo "4. Пароль в docker-compose.yml:"
+    - grep -A2 -B2 "POSTGRES_PASSWORD" docker-compose.yml
+
+    # Проверяем невидимые символы
+    - echo "5. Проверка на невидимые символы (hex dump):"
+    - echo "GitLab переменная:" && echo -n "${POSTGRES_PASSWORD}" | xxd
+    - echo "Первые 10 символов пароля:${POSTGRES_PASSWORD:0:10}..."
+
     # Проверяем что файл создан (без паролей)
     - echo "Создан .env файл:"
     - grep -v "PASSWORD\|SECRET_KEY" .env
@@ -146,7 +160,7 @@ deploy_application:
      # Ждем запуска приложения
     - echo "Ожидание запуска приложения (макс 3 минуты)..."
     - |
-      for i in $(seq 1 60); do
+      for i in $(seq 1 36); do
         if curl -s -f http://localhost:80 > /dev/null 2>&1; then
           echo " Приложение запущено после $i попыток!"
           break
