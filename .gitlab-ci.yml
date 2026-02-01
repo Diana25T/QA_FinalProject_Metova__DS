@@ -147,7 +147,7 @@ deploy_application:
     - echo "Запуск docker-compose up..."
     - docker-compose up -d
 
-     # Ожидание готовности базы данных.
+    # Ожидание готовности базы данных
     - echo "Ожидание готовности базы данных..."
     - |
       MAX_RETRIES=30
@@ -167,14 +167,19 @@ deploy_application:
     # === Ожидание запуска приложения ===
     - |
       echo "Ожидание запуска приложения..."
-      MAX_WAIT=240  # Увеличиваем время для Tandoor (ему нужно больше)
+      MAX_WAIT=240  
       WAIT_INTERVAL=5
+      APP_URL="http://web_recipes:80"
+      
       for i in $(seq 1 $((MAX_WAIT/WAIT_INTERVAL))); do
-          # Пробуем сделать HTTP запрос к приложению на порту 80
-          if curl -f -s -o /dev/null -m 5 http://localhost:80/ || \
-             curl -f -s -o /dev/null -m 5 http://web_recipes:80/ || \
-             curl -f -s -o /dev/null -m 5 http://127.0.0.1:80/; then
-              echo "✓ Приложение запущено и отвечает"
+          echo "Попытка $i: Проверка $APP_URL..."
+          
+          # Проверяем доступность приложения внутри Docker сети
+          if curl -f -s -o /dev/null -m 10 $APP_URL; then
+              echo "✓ Приложение запущено и отвечает по адресу: $APP_URL"
+              # Дополнительная проверка HTTP статуса
+              HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -m 5 $APP_URL)
+              echo "HTTP статус: $HTTP_STATUS"
               break
           fi
       
@@ -192,54 +197,49 @@ deploy_application:
               # Дополнительная диагностика
               echo "=== ДИАГНОСТИКА ==="
               echo "1. Состояние контейнеров:"
-              docker-compose ps
+              docker-compose ps -a
       
-              echo "2. Логи веб-контейнера:"
-              docker-compose logs web_recipes
+              echo "2. Логи веб-контейнера (последние 20 строк):"
+              docker-compose logs --tail=20 web_recipes
       
               echo "3. Проверка процессов в контейнере:"
-              docker-compose exec -T web_recipes ps aux || true
+              docker-compose exec web_recipes ps aux || true
       
-              echo "4. Проверка сетевых интерфейсов:"
-              docker-compose exec -T web_recipes ifconfig || ip addr || true
-      
-              echo "5. Проверка открытых портов:"
-              docker-compose exec -T web_recipes netstat -tlnp 2>/dev/null || echo "netstat недоступен"
-      
+              echo "4. Проверка портов в контейнере:"
+              docker-compose exec web_recipes netstat -tlnp 2>/dev/null || \
+              docker-compose exec web_recipes ss -tlnp 2>/dev/null || echo "Утилиты проверки портов недоступны"
+              
+              echo "5. Проверка конфигурации Nginx:"
+              docker-compose exec web_recipes nginx -t 2>/dev/null || echo "Nginx недоступен"
+              
+              echo "6. Проверка доступности изнутри контейнера:"
+              docker-compose exec web_recipes curl -s http://localhost || echo "Не удалось проверить изнутри"
+              
               exit 1
           fi
       done
-    - echo " Приложение успешно развернуто!"
-    - echo "Проверка состояния контейнеров..."
+
+    - echo "✓ Приложение успешно развернуто!"
+
+    # Проверка состояния контейнеров
+    - echo "=== ПРОВЕРКА СОСТОЯНИЯ ==="
     - docker-compose ps
-    - echo "Сетевые подключения..."
-    - docker network inspect qa_finalproject_metova_default 2>/dev/null || echo "Сеть не найдена"
-    - echo "=== ДИАГНОСТИКА ПОСЛЕ ЗАПУСКА ==="
-    - sleep 10  # Дать приложению время на инициализацию
+    - echo "Сетевые подключения:"
+    - docker network inspect qa_finalproject_metova_default 2>/dev/null || docker network ls
 
     # Проверка доступности приложения
-    - echo "1. Проверка доступности приложения:"
-    - timeout 30 curl -v http://localhost/ || echo "Curl завершился с ошибкой"
+    - echo "=== ТЕСТ ДОСТУПНОСТИ ==="
+    - echo "1. Проверка главной страницы:"
+    - curl -f -s -o /dev/null http://web_recipes:80 && echo "✓ Главная страница доступна" || echo "✗ Главная страница недоступна"
 
-    # Проверка здоровья API
-    - echo "2. Проверка здоровья API:"
-    - timeout 30 curl -v http://localhost/api/ || echo "API недоступен"
+    - echo "2. Проверка API:"
+    - curl -s http://web_recipes:80/api/ | head -c 100 && echo "..." || echo "API не отвечает"
 
-    # Проверка процессов
-    - echo "3. Проверка процессов в контейнере:"
-    - docker exec qa_finalproject_metova-web_recipes-1 ps aux || echo "Не удалось подключиться к контейнеру"
+    - echo "3. Проверка состояния Gunicorn:"
+    - docker-compose exec web_recipes ps aux | grep gunicorn || echo "Gunicorn не найден"
 
-    # Проверка ошибок в логах Nginx
-    - echo "4. Последние ошибки из логов Nginx:"
-    - docker exec qa_finalproject_metova-web_recipes-1 tail -20 /var/log/nginx/error.log 2>/dev/null || echo "Файл логов не найден"
-
-    # Проверка логов приложения
-    - echo "5. Последние логи приложения:"
-    - docker logs qa_finalproject_metova-web_recipes-1 --tail 20
-
-
-    - WEB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qa_finalproject_metova-web_recipes-1 2>/dev/null || echo "не_найден")
-    - echo "APP_URL=http://${WEB_IP}:80" > deploy.env
+    # Сохраняем переменные окружения для следующих этапов
+    - echo "APP_URL=http://web_recipes:80" > deploy.env
     - echo "BASE_URL=http://web_recipes:80" >> deploy.env
     - docker-compose logs --no-color > docker_logs.txt
 
