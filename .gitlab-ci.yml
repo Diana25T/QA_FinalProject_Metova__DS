@@ -144,46 +144,50 @@ deploy_application:
     - cat .env
       
       # Запуск приложения
-      - echo "Запуск docker-compose up..."
-      - docker-compose up -d
-      
-      # Ожидание запуска БД
-      - echo "Ожидание запуска базы данных..."
-      - |
+    - echo "Запуск docker-compose up..."
+    - docker-compose up -d
+
+     # Запуск приложения
+    - echo "Запуск docker-compose up..."
+    - docker-compose up -d
+
+    # Ожидание запуска БД
+    - echo "Ожидание запуска базы данных..."
+    - |
       for i in {1..30}; do
-      if docker-compose exec -T db_recipes pg_isready -U djangodb; then
-      echo "База данных запущена"
-      break
-      fi
+        if docker-compose exec -T db_recipes pg_isready -U djangodb; then
+          echo "База данных запущена"
+          break
+        fi
       echo "Ожидание БД... ($i/30)"
       sleep 2
-      done
-      
-      # Ожидание запуска приложения
-      - echo "Ожидание запуска приложения..."
-      - |
+     done
+
+    # Ожидание запуска приложения
+    - echo "Ожидание запуска приложения..."
+    - |
       for i in {1..30}; do
-      if docker run --network qa_finalproject_metova_default --rm curlimages/curl \
-      curl -s -f http://web_recipes:80 > /dev/null; then
-      echo "Приложение запущено"
-      break
-      fi
+        if docker run --network qa_finalproject_metova_default --rm curlimages/curl \
+          curl -s -f http://web_recipes:80 > /dev/null; then
+          echo "Приложение запущено"
+          break
+        fi
       echo "Ожидание приложения... ($i/30)"
       sleep 2
-      done
-      
-      # Финальная проверка
-      - |
+     done
+
+    # Финальная проверка
+    - |
       if docker run --network qa_finalproject_metova_default --rm curlimages/curl \
-      curl -s -f -o /dev/null -w "%{http_code}" http://web_recipes:80 | grep -q "200\|302"; then
-      echo "✓ Приложение успешно запущено"
+        curl -s -f -o /dev/null -w "%{http_code}" http://web_recipes:80 | grep -q "200\|302"; then
+        echo " Приложение успешно запущено"
       else
-      echo "✗ Приложение не запустилось"
-      docker-compose logs
-      exit 1
+        echo " Приложение не запустилось"
+        docker-compose logs
+        exit 1
       fi
 
-# Этап 2: Запуск API тестов
+# Этап 3: Запуск API тестов
 test_api:
   stage: test_api
   variables:
