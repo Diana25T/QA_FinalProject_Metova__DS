@@ -147,33 +147,51 @@ deploy_application:
     - echo "Запуск docker-compose up..."
     - docker-compose up -d
 
-     # Запуск приложения
-    - echo "Запуск docker-compose up..."
-    - docker-compose up -d
-
     # Ожидание запуска БД
     - echo "Ожидание готовности базы данных..."
-    - timeout 180s docker-compose logs -f db_recipes | grep -q "database system is ready to accept connections"
-
-    - echo "Ожидание запуска приложения (может занять до 3 минут для первого запуска)..."
     - |
-      MAX_WAIT=180  # 3 минуты в секундах
-      WAITED=0
+      MAX_RETRIES=30
+      DB_READY=false
       
-      while [ $WAITED -lt $MAX_WAIT ]; do
-        # Пробуем получить ответ от приложения
-        if docker run --network ${CI_PROJECT_NAME}_default --rm curlimages/curl \
-          --max-time 10 --retry 0 --silent \
-          --output /dev/null --fail "http://web_recipes:80/"; then
-          echo " Приложение доступно!"
+      for i in $(seq 1 $MAX_RETRIES); do
+        echo "Попытка $i/$MAX_RETRIES: Проверка готовности БД..."
+        
+        # Используем pg_isready
+        if docker-compose exec -T db_recipes pg_isready -U djangodb -d djangodb 2>/dev/null; then
+          echo "✓ База данных готова"
+          DB_READY=true
           break
         fi
         
-        # Также проверяем API endpoint (более надежно для Tandoor Recipes)
+        # Проверяем логи (на всякий случай)
+        if docker-compose logs db_recipes 2>&1 | tail -5 | grep -q "ready to accept connections"; then
+          echo "✓ База данных готова (по логам)"
+          DB_READY=true
+          break
+        fi
+        
+        sleep 2
+      done
+      
+      if [ "$DB_READY" = "false" ]; then
+        echo "✗ База данных не готова за $((MAX_RETRIES * 2)) секунд"
+        echo "Логи базы данных:"
+        docker-compose logs db_recipes
+        exit 1
+      fi
+
+    # Ожидание запуска приложения
+    - echo "Ожидание запуска приложения..."
+    - |
+      MAX_WAIT=180
+      WAITED=0
+      
+      while [ $WAITED -lt $MAX_WAIT ]; do
+        # Проверяем API endpoint
         if docker run --network ${CI_PROJECT_NAME}_default --rm curlimages/curl \
           --max-time 10 --retry 0 --silent \
-          --output /dev/null --fail "http://web_recipes:80/api/"; then
-          echo " API приложения доступно!"
+          --output /dev/null --fail "http://web_recipes:80/api/" 2>/dev/null; then
+          echo "✓ API приложения доступно!"
           break
         fi
         
@@ -196,13 +214,18 @@ deploy_application:
       done
       
       if [ $WAITED -ge $MAX_WAIT ]; then
-        echo " Приложение не запустилось за $MAX_WAIT секунд"
+        echo "✗ Приложение не запустилось за $MAX_WAIT секунд"
         echo "=== ПОЛНЫЕ ЛОГИ ПРИЛОЖЕНИЯ ==="
         docker-compose logs web_recipes
         exit 1
       fi
 
-    - echo " Приложение успешно развернуто!"
+    - echo "✓ Приложение успешно развернуто!"
+    - WEB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qa_finalproject_metova-web_recipes-1 2>/dev/null || echo "не_найден")
+    - echo "APP_URL=http://${WEB_IP}:80" > deploy.env
+    - echo "BASE_URL=http://web_recipes:80" >> deploy.env
+    - docker-compose logs --no-color > docker_logs.txt
+
   artifacts:
     when: always
     paths:
@@ -212,8 +235,6 @@ deploy_application:
   rules:
       - if: '$CI_MERGE_REQUEST_ID'
       - if: '$CI_COMMIT_BRANCH == "main"'
-
-
 
 # Этап 3: Запуск API тестов
 test_api:
