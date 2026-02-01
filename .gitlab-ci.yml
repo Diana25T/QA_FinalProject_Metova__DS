@@ -96,12 +96,16 @@ deploy_application:
     - docker:dind
   needs:
     - prepare_dependencies
+  variables:
+    POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+    SECRET_KEY: $SECRET_KEY
   script:
     - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ В DOCKER ==="
 
     # Устанавливаем Docker Compose (в docker:latest его нет)
-    - apk add --no-cache py3-pip docker-compose  #  в docker:latest используется apk, не apt-get!
+    - apk add --no-cache py3-pip docker-compose curl  #  в docker:latest используется apk, не apt-get!
     - docker-compose --version
+    - curl --version
 
     # Настраиваем Docker
     - export DOCKER_HOST="tcp://docker:2375"
@@ -138,7 +142,16 @@ deploy_application:
     - echo "2. Содержимое .env файла:"
     - cat .env
 
-    - echo "3. Пароль из .env файла:'$(grep POSTGRES_PASSWORD .env | cut -d= -f2)'"
+    # Проверка пароля
+    - echo "3. Проверка пароля:"
+    - echo "Длина переменной POSTGRES_PASSWORD:${#POSTGRES_PASSWORD}"
+    - echo "Первые 2 символа:${POSTGRES_PASSWORD:0:2}..."
+    - |
+      if [ -z "$POSTGRES_PASSWORD" ]; then
+      echo "  ВНИМАНИЕ: POSTGRES_PASSWORD ПУСТАЯ!"
+      else
+      echo "  Пароль установлен (длина: ${#POSTGRES_PASSWORD} символов)"
+      fi
 
     # Проверяем docker-compose.yml
     - echo "4. Пароль в docker-compose.yml:"
@@ -156,6 +169,18 @@ deploy_application:
     # Запускаем приложение
     - echo "Запускаем docker-compose up..."
     - docker-compose up -d
+
+    # Проверка подключения к базе данных
+    - echo "Проверяем подключение к базе данных..."
+    - |
+    - for i in {1..30}; do
+    - if docker-compose exec -T db_recipes psql -U djangodb -d djangodb -c "SELECT 1;" 2>/dev/null; then
+    - echo "✓ Подключение к базе данных успешно"
+    - break
+    - fi
+    - echo "Попытка $i/30:База данных не готова..."
+    - sleep 2
+    - done
 
      # Ждем запуска приложения
     - echo "Ожидание запуска приложения (макс 3 минуты)..."
@@ -188,11 +213,18 @@ deploy_application:
         exit 1
       fi
 
+    # Проверка сети и контейнеров
+    - echo "Проверка сети и контейнеров..."
+    - docker network ls
+    - docker-compose ps -a
+    - echo "Логи базы данных:"
+    - docker-compose logs db_recipes --tail=10
+
     # Проверяем статус
     - echo "Статус контейнеров:"
     - docker-compose ps
     - echo "Проверка доступности приложения:"
-    - curl -s -o /dev/null -w "HTTP статус:%{http_code}\n" http://localhost:80 || echo "Запрос не удался"
+    - curl -s -o /dev/null -w "HTTP статус:%{http_code}\n" --max-time 5 http://localhost:80 || echo "Запрос не удался (таймаут 5 сек)"
 
 
 # Этап 2: Запуск API тестов
