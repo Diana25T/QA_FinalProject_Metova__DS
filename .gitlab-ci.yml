@@ -115,7 +115,7 @@ deploy_application:
 
      # СОЗДАЕМ .env:
     - |
-      cat > .env << 'EOF'
+      cat > .env << EOF
       # Django settings
       SECRET_KEY=${SECRET_KEY}
       DEBUG=1
