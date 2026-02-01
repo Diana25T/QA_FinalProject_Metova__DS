@@ -101,7 +101,6 @@ deploy_application:
 
     # Устанавливаем Docker Compose (в docker:latest его нет)
     - apk add --no-cache py3-pip docker-compose  #  в docker:latest используется apk, не apt-get!
-    - pip3 install docker-compose
     - docker-compose --version
 
     # Настраиваем Docker
