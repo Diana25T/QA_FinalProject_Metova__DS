@@ -210,10 +210,9 @@ deploy_application:
       - docker-compose.yml
     expire_in: 1 week
     rules:
-      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    dependencies:
-      - prepare_dependencies
-    needs: [ "prepare_dependencies" ]
+      - if: '$CI_MERGE_REQUEST_ID'
+      - if: '$CI_COMMIT_BRANCH == "main"'
+
 
 
 # Этап 3: Запуск API тестов
