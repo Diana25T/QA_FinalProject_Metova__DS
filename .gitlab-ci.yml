@@ -159,9 +159,9 @@ deploy_application:
           echo "База данных запущена"
           break
         fi
-      echo "Ожидание БД... ($i/30)"
-      sleep 2
-     done
+        echo "Ожидание БД... ($i/30)"
+        sleep 2
+       done
 
     # Ожидание запуска приложения
     - echo "Ожидание запуска приложения..."
@@ -172,9 +172,9 @@ deploy_application:
           echo "Приложение запущено"
           break
         fi
-      echo "Ожидание приложения... ($i/30)"
-      sleep 2
-     done
+        echo "Ожидание приложения... ($i/30)"
+        sleep 2
+       done
 
     # Финальная проверка
     - |
