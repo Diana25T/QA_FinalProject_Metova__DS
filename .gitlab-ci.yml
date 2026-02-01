@@ -152,40 +152,69 @@ deploy_application:
     - docker-compose up -d
 
     # Ожидание запуска БД
-    - echo "Ожидание запуска базы данных..."
+    - echo "Ожидание готовности базы данных..."
+    - timeout 180s docker-compose logs -f db_recipes | grep -q "database system is ready to accept connections"
+
+    - echo "Ожидание запуска приложения (может занять до 3 минут для первого запуска)..."
     - |
-      for i in {1..30}; do
-        if docker-compose exec -T db_recipes pg_isready -U djangodb; then
-          echo "База данных запущена"
+      MAX_WAIT=180  # 3 минуты в секундах
+      WAITED=0
+      
+      while [ $WAITED -lt $MAX_WAIT ]; do
+        # Пробуем получить ответ от приложения
+        if docker run --network ${CI_PROJECT_NAME}_default --rm curlimages/curl \
+          --max-time 10 --retry 0 --silent \
+          --output /dev/null --fail "http://web_recipes:80/"; then
+          echo " Приложение доступно!"
           break
         fi
-        echo "Ожидание БД... ($i/30)"
-        sleep 2
-       done
-
-    # Ожидание запуска приложения
-    - echo "Ожидание запуска приложения..."
-    - |
-      for i in {1..30}; do
-        if docker run --network qa_finalproject_metova_default --rm curlimages/curl \
-          curl -s -f http://web_recipes:80 > /dev/null; then
-          echo "Приложение запущено"
+        
+        # Также проверяем API endpoint (более надежно для Tandoor Recipes)
+        if docker run --network ${CI_PROJECT_NAME}_default --rm curlimages/curl \
+          --max-time 10 --retry 0 --silent \
+          --output /dev/null --fail "http://web_recipes:80/api/"; then
+          echo " API приложения доступно!"
           break
         fi
-        echo "Ожидание приложения... ($i/30)"
-        sleep 2
-       done
-
-    # Финальная проверка
-    - |
-      if docker run --network qa_finalproject_metova_default --rm curlimages/curl \
-        curl -s -f -o /dev/null -w "%{http_code}" http://web_recipes:80 | grep -q "200\|302"; then
-        echo " Приложение успешно запущено"
-      else
-        echo " Приложение не запустилось"
-        docker-compose logs
+        
+        # Проверяем, не "умерло" ли приложение
+        if ! docker-compose ps web_recipes | grep -q "Up"; then
+          echo "✗ Контейнер приложения упал!"
+          docker-compose logs web_recipes
+          exit 1
+        fi
+        
+        WAITED=$((WAITED + 5))
+        echo "Ожидание... ($WAITED/$MAX_WAIT сек.)"
+        sleep 5
+        
+        # Показываем прогресс каждые 30 секунд
+        if [ $((WAITED % 30)) -eq 0 ]; then
+          echo "--- Текущие логи приложения (последние 5 строк) ---"
+          docker-compose logs --tail=5 web_recipes 2>/dev/null || true
+        fi
+      done
+      
+      if [ $WAITED -ge $MAX_WAIT ]; then
+        echo " Приложение не запустилось за $MAX_WAIT секунд"
+        echo "=== ПОЛНЫЕ ЛОГИ ПРИЛОЖЕНИЯ ==="
+        docker-compose logs web_recipes
         exit 1
       fi
+
+    - echo " Приложение успешно развернуто!"
+  artifacts:
+    when: always
+    paths:
+      - .env
+      - docker-compose.yml
+    expire_in: 1 week
+    rules:
+      - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    dependencies:
+      - prepare_dependencies
+    needs: [ "prepare_dependencies" ]
+
 
 # Этап 3: Запуск API тестов
 test_api:
@@ -196,7 +225,7 @@ test_api:
     - job: prepare_dependencies
       artifacts: true
     - job: deploy_application  # Зависимость от запущенного приложения
-      artifacts: false
+      artifacts: true
   script:
     # Активируем виртуальное окружение
     - source venv/bin/activate
