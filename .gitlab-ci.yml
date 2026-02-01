@@ -168,24 +168,28 @@ deploy_application:
 
     # Проверка подключения к базе данных
     - echo "Проверяем подключение к базе данных..."
-     for i in $(seq 1 30); do
-       if docker-compose exec -T db_recipes psql -U djangodb -d djangodb -c "SELECT 1;" 2>/dev/null; then
-     echo "✓ Подключение к базе данных успешно"
-     break
-     fi
-    - echo "Попытка $i/30:База данных не готова..."
+    - |
+      MAX_RETRIES=30
+      DB_CONNECTED=false
 
-    # Показываем ошибки подключения
-    - docker-compose logs db_recipes --tail=1 2>/dev/null | grep -i "FATAL\|ERROR\|authentication" || true
-    
-     sleep 2
-     done
+      for i in $(seq 1 $MAX_RETRIES); do
+        echo "Попытка $i/$MAX_RETRIES: Проверка подключения к БД..."
 
-     if [ $i -eq 30 ]; then
-     echo "✗ Не удалось подключиться к базе данных за 60 секунд"
-     echo "Логи базы данных:"
-     docker-compose logs db_recipes
-     fi
+        if docker-compose exec -T db_recipes psql -U djangodb -d djangodb -c "SELECT 1;" 2>/dev/null; then
+          echo " Подключение к базе данных успешно"
+          DB_CONNECTED=true
+          break
+        fi
+
+        sleep 2
+      done
+
+      if [ "$DB_CONNECTED" = "false" ]; then
+        echo " Не удалось подключиться к базе данных за $MAX_RETRIES попыток"
+        echo "Логи базы данных:"
+        docker-compose logs db_recipes
+        exit 1
+      fi
 
      # Ждем запуска приложения
     - echo "Ожидание запуска приложения (макс 3 минуты)..."
