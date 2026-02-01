@@ -209,7 +209,7 @@ deploy_application:
       - .env
       - docker-compose.yml
     expire_in: 1 week
-    rules:
+  rules:
       - if: '$CI_MERGE_REQUEST_ID'
       - if: '$CI_COMMIT_BRANCH == "main"'
 
