@@ -118,7 +118,7 @@ deploy_application:
       cat > .env << 'EOF'
       # Django settings
       SECRET_KEY=${SECRET_KEY}
-      DEBUG=True
+      DEBUG=1
       ALLOWED_HOSTS=*,localhost,web_recipes
       CSRF_TRUSTED_ORIGINS=http://localhost,http://web_recipes
       
