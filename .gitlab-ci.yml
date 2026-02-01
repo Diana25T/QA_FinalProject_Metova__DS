@@ -127,7 +127,7 @@ deploy_application:
       # Django settings
       SECRET_KEY=${SECRET_KEY}
       DEBUG=1
-      ALLOWED_HOSTS=*
+      ALLOWED_HOSTS=*,localhost,web_recipes,127.0.0.1,0.0.0.0
       CSRF_TRUSTED_ORIGINS=http://localhost,http://web_recipes
       
       # Database settings
@@ -167,20 +167,43 @@ deploy_application:
     - docker-compose up -d
 
     # После docker-compose up -d
-    - echo "=== ДИАГНОСТИКА ПРИЛОЖЕНИЯ ==="
-    - sleep 45  # Даем больше времени на запуск
+    # ПОСЛЕ docker-compose up -d добавьте:
 
+    - echo "Ждем полного запуска приложения..."
+    - sleep 30
+
+    - echo "=== ПРОВЕРКА ДОСТУПНОСТИ ==="
+
+    # 1. Проверка изнутри Docker сети (самый надежный способ)
     - echo "1. Проверка изнутри Docker сети:"
-    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -o /dev/null -w "Статус:%{http_code}\n" http://web_recipes:80
+    - |
+      if docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -f http://web_recipes:80 > /dev/null; then
+        echo "✓ Приложение доступно изнутри Docker сети"
+      else
+        echo "✗ Приложение НЕ доступно изнутри Docker сети"
+        docker-compose logs web_recipes --tail=20
+        exit 1
+      fi
 
+    # 2. Проверка API
     - echo "2. Проверка API:"
-    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -o /dev/null -w "API статус:%{http_code}\n" http://web_recipes:80/api/
+    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -w "API статус:%{http_code}\n" -o /dev/null http://web_recipes:80/api/
 
-    - echo "3. Логи приложения:"
-    - docker-compose logs web_recipes --tail=30
+    # 3. Проверка что порт экспортируется на хост
+    - echo "3. Проверка порта на хосте:"
+    - |
+      if nc -z -w 2 localhost 80 2>/dev/null; then
+        echo " Порт 80 открыт на хосте"
+        curl -s -o /dev/null -w "HTTP статус с localhost: %{http_code}\n" http://localhost:80 || echo "✗ Запрос к localhost не удался"
+      else
+        echo "Порт 80 НЕ открыт на хосте (но это нормально для Docker-in-Docker)"
+        echo "   Тесты будут использовать http://web_recipes:80"
+      fi
 
-    - echo "4. Проверка доступности для тестов:"
-    - echo "Теперь тесты должны использовать http://web_recipes:80 вместо localhost"
+    # 4. Устанавливаем переменную для тестов
+    - echo "4. Устанавливаем URL для тестов:"
+    - echo "Для API тестов используйте:http://web_recipes:80"
+    - echo "Для UI тестов используйте:http://web_recipes:80"
 
     # Проверка подключения к базе данных
     - echo "Проверяем подключение к базе данных..."
@@ -314,6 +337,8 @@ deploy_application:
 # Этап 2: Запуск API тестов
 test_api:
   stage: test_api
+  variables:
+     BASE_URL: "http://web_recipes:80"
   needs:
     - job: prepare_dependencies
       artifacts: true
@@ -331,10 +356,10 @@ test_api:
 
     #  Проверяем доступность приложения перед тестами
     - echo "Проверка доступности приложения..."
-    - curl -s -f http://localhost:80 > /dev/null && echo "✓ Приложение доступно" || echo "✗ Приложение недоступно"
+    - curl -s -f http://web_recipes:80 > /dev/null && echo "✓ Приложение доступно" || echo "✗ Приложение недоступно"
 
     # Запускаем API тесты с маркировкой 'api' и создаем JUnit отчет
-    - pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
+    - pytest tests/ -m api -v --base-url=$BASE_URL --alluredir=allure-results-api --junitxml=junit-api.xml
 
   artifacts:
     when: always
