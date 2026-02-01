@@ -142,14 +142,14 @@ deploy_application:
      # Ждем запуска приложения
     - echo "Ожидание запуска приложения (макс 3 минуты)..."
     - |
-      for i in {1..36}; do
+      for i in $(seq 1 36); do
         if curl -s -f http://localhost:80 > /dev/null 2>&1; then
           echo " Приложение запущено после $i попыток!"
           break
         fi
         echo "Попытка $i/36: ждем 5 секунд..."
         sleep 5
-        
+      
         # Каждые 30 секунд показываем логи
         if [ $((i % 6)) -eq 0 ]; then
           echo "--- Текущие логи ---"
