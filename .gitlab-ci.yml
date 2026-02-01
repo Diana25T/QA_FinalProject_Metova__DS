@@ -127,7 +127,7 @@ deploy_application:
       # Django settings
       SECRET_KEY=${SECRET_KEY}
       DEBUG=1
-      ALLOWED_HOSTS=*,localhost,web_recipes
+      ALLOWED_HOSTS=*
       CSRF_TRUSTED_ORIGINS=http://localhost,http://web_recipes
       
       # Database settings
@@ -165,6 +165,22 @@ deploy_application:
     # Запускаем приложение
     - echo "Запускаем docker-compose up..."
     - docker-compose up -d
+
+    # После docker-compose up -d
+    - echo "=== ДИАГНОСТИКА ПРИЛОЖЕНИЯ ==="
+    - sleep 45  # Даем больше времени на запуск
+
+    - echo "1. Проверка изнутри Docker сети:"
+    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -o /dev/null -w "Статус:%{http_code}\n" http://web_recipes:80
+
+    - echo "2. Проверка API:"
+    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -o /dev/null -w "API статус:%{http_code}\n" http://web_recipes:80/api/
+
+    - echo "3. Логи приложения:"
+    - docker-compose logs web_recipes --tail=30
+
+    - echo "4. Проверка доступности для тестов:"
+    - echo "Теперь тесты должны использовать http://web_recipes:80 вместо localhost"
 
     # Проверка подключения к базе данных
     - echo "Проверяем подключение к базе данных..."
@@ -291,6 +307,9 @@ deploy_application:
     - curl -I http://localhost:80 || echo "nginx не отвечает"
     - echo "=== ПРОВЕРКА ДОСТУПНОСТИ ИЗНУТРИ DOCKER ==="
     - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -o /dev/null -w "%{http_code}" http://web_recipes:80 && echo "✓ Доступен изнутри Docker сети" || echo "✗ Не доступен изнутри Docker сети"
+
+    - echo "=== БЫСТРЫЙ ТЕСТ API ==="
+    - docker run --network qa_finalproject_metova_default --rm curlimages/curl curl -s -v "http://web_recipes:80/api/recipe/" 2>&1 | grep -E "HTTP|<title>|error" | head -10
 
 # Этап 2: Запуск API тестов
 test_api:
