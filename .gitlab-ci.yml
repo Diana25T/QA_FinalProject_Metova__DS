@@ -214,29 +214,29 @@ deploy_application:
     - docker-compose ps
     - echo "Сетевые подключения..."
     - docker network inspect qa_finalproject_metova_default 2>/dev/null || echo "Сеть не найдена"
-
     - echo "=== ДИАГНОСТИКА ПОСЛЕ ЗАПУСКА ==="
-      - sleep 10  # Дать приложению время на инициализацию
-      
-      # Проверка доступности приложения
-      - echo "1. Проверка доступности приложения:"
-      - timeout 30 curl -v http://localhost/ || echo "Curl завершился с ошибкой"
-      
-      # Проверка здоровья API
-      - echo "2. Проверка здоровья API:"
-      - timeout 30 curl -v http://localhost/api/ || echo "API недоступен"
-      
-      # Проверка процессов
-      - echo "3. Проверка процессов в контейнере:"
-      - docker exec qa_finalproject_metova-web_recipes-1 ps aux || echo "Не удалось подключиться к контейнеру"
-      
-      # Проверка ошибок в логах Nginx
-      - echo "4. Последние ошибки из логов Nginx:"
-      - docker exec qa_finalproject_metova-web_recipes-1 tail -20 /var/log/nginx/error.log 2>/dev/null || echo "Файл логов не найден"
-      
-      # Проверка логов приложения
-      - echo "5. Последние логи приложения:"
-      - docker logs qa_finalproject_metova-web_recipes-1 --tail 20
+    - sleep 10  # Дать приложению время на инициализацию
+
+    # Проверка доступности приложения
+    - echo "1. Проверка доступности приложения:"
+    - timeout 30 curl -v http://localhost/ || echo "Curl завершился с ошибкой"
+
+    # Проверка здоровья API
+    - echo "2. Проверка здоровья API:"
+    - timeout 30 curl -v http://localhost/api/ || echo "API недоступен"
+
+    # Проверка процессов
+    - echo "3. Проверка процессов в контейнере:"
+    - docker exec qa_finalproject_metova-web_recipes-1 ps aux || echo "Не удалось подключиться к контейнеру"
+
+    # Проверка ошибок в логах Nginx
+    - echo "4. Последние ошибки из логов Nginx:"
+    - docker exec qa_finalproject_metova-web_recipes-1 tail -20 /var/log/nginx/error.log 2>/dev/null || echo "Файл логов не найден"
+
+    # Проверка логов приложения
+    - echo "5. Последние логи приложения:"
+    - docker logs qa_finalproject_metova-web_recipes-1 --tail 20
+
 
     - WEB_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qa_finalproject_metova-web_recipes-1 2>/dev/null || echo "не_найден")
     - echo "APP_URL=http://${WEB_IP}:80" > deploy.env
