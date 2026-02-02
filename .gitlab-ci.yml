@@ -311,9 +311,10 @@ test_api:
 
   before_script:
     # Устанавливаем docker-compose
-    - echo "Устанавливаем docker-compose..."
-    - apk add --no-cache docker-compose
+    - echo "Устанавливаем необходимые пакеты..."
+    - apk add --no-cache docker-compose curl bash
     - docker-compose --version
+    - curl --version
     - echo "Готово!"
 
   script:
@@ -328,29 +329,29 @@ test_api:
     - echo "Список файлов:"
     - ls -la
 
-    # Проверяем что docker-compose.yml на месте
-    - echo "Проверяем docker-compose.yml:"
-    - ls -la docker-compose.yml || echo "Файл не найден!"
-    - echo "Первые строки docker-compose.yml:"
-    - head -10 docker-compose.yml
-
     # Запускаем приложение
     - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ ==="
     - docker-compose up -d
 
     # Ждем запуска
-    - echo "Ждем 30 секунд пока приложение запустится..."
-    - sleep 30
+    - echo "Ждем 60 секунд пока приложение полностью запустится..."
+    - sleep 60
 
     # Проверяем что запустилось
     - echo "Проверяем контейнеры:"
     - docker-compose ps
-    - docker ps
+    - echo "Логи приложения (первые 20 строк):"
+    - docker-compose logs --tail=20 web_recipes || true
 
     # Проверяем доступность
     - echo "Проверяем доступность приложения..."
     - curl -s -o /dev/null -w "%{http_code}" http://localhost:80 || echo "Не удалось подключиться"
     - curl -I http://localhost:80 || echo "Проверка HTTP заголовков"
+
+    # Пробуем получить ответ от API
+    - echo "=== ПРОВЕРКА API ==="
+    - curl -s http://localhost:80/api/ || echo "API не ответил"
+    - curl -s http://localhost:80/api/recipe/ || echo "Recipe API не ответил"
 
     # Запускаем тесты
     - echo "=== ЗАПУСК ТЕСТОВ ==="
