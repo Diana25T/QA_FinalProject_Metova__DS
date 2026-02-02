@@ -297,7 +297,10 @@ test_api:
   services:
     - docker:dind
   needs:
-    - prepare_dependencies
+    - job: prepare_dependencies
+      artifacts: true
+    - job: deploy_application
+      artifacts: true
   variables:
     DOCKER_HOST: "tcp://docker:2375"
     DOCKER_TLS_CERTDIR: ""
@@ -327,6 +330,70 @@ test_api:
         echo "Попытка $i/30: Приложение ещё не готово..."
         sleep 5
       done
+
+   # 3. Проверяем логи приложения
+    - echo "3. Проверка логов приложения..."
+    - docker-compose logs web_recipes --tail 20
+
+    # 4. Проверяем процессы внутри контейнера
+    - echo "4. Проверка процессов в контейнере..."
+    - docker-compose exec web_recipes ps aux 2>/dev/null || echo "Не удалось проверить процессы"
+
+    # 5. Проверяем порты внутри контейнера
+    - echo "5. Проверка портов в контейнере..."
+    - docker-compose exec web_recipes netstat -tln 2>/dev/null || echo "Не удалось проверить порты"
+
+    # 6. Ждем готовности приложения (проверяем изнутри контейнера)
+    - echo "6. Ожидание приложения..."
+    - |
+      for i in {1..30}; do
+        echo "Попытка $i/30: Проверка приложения..."
+        # Проверяем несколькими способами
+        if docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
+          echo "✓ Приложение доступно внутри контейнера (через localhost)"
+          break
+        elif docker-compose exec -T web_recipes curl -s -f http://127.0.0.1:80 > /dev/null 2>&1; then
+          echo "✓ Приложение доступно внутри контейнера (через 127.0.0.1)"
+          break
+        elif docker-compose exec -T web_recipes wget -q --spider http://localhost:80 2>/dev/null; then
+          echo "✓ Приложение доступно (через wget)"
+          break
+        else
+          echo "Приложение ещё не готово..."
+          # Выводим логи для отладки
+          if [ $((i % 5)) -eq 0 ]; then
+            echo "--- Логи приложения (последние 5 строк) ---"
+            docker-compose logs web_recipes --tail 5
+          fi
+          sleep 5
+        fi
+      done
+
+    # 7. Если приложение не готово, продолжаем с диагностикой
+    - echo "7. Диагностика если приложение не доступно..."
+    - |
+      # Проверяем еще раз
+      if ! docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
+        echo "Приложение всё ещё не доступно, но продолжаем..."
+        echo "=== ПОЛНАЯ ДИАГНОСТИКА ==="
+        echo "1. Состояние всех контейнеров:"
+        docker-compose ps -a
+        
+        echo "2. Логи веб-контейнера (последние 30 строк):"
+        docker-compose logs web_recipes --tail 30
+        
+        echo "3. Проверка сети в контейнере:"
+        docker-compose exec web_recipes ip addr 2>/dev/null || echo "Не удалось проверить сеть"
+        
+        echo "4. Проверка наличия gunicorn процессов:"
+        docker-compose exec web_recipes ps aux | grep -i gunicorn || echo "Gunicorn не найден"
+        
+        echo "5. Проверка наличия nginx процессов:"
+        docker-compose exec web_recipes ps aux | grep -i nginx || echo "Nginx не найден"
+      else
+        echo "✓ Приложение готово к тестированию"
+      fi
+    
 
     # 3. Запускаем API тесты
     - echo "3. Запуск API тестов..."
