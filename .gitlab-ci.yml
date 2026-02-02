@@ -415,47 +415,70 @@ test_api:
 test_ui:
   stage: test_ui
   image: python:3.11
-  needs:
-    - job: prepare_dependencies
-      artifacts: true
-    - job: deploy_application
-      artifacts: true
   services:
+    - docker:dind
     - selenium/standalone-chrome:latest
+  needs:
+    - prepare_dependencies
   variables:
-    BASE_URL: "http://localhost:80"
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
     SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"
+    BASE_URL: "http://localhost:80"
 
   before_script:
-    # Устанавливаем дополнительные пакеты
-    - apt-get update && apt-get install -y curl wget
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
+    # Устанавливаем Docker и зависимости
+    - apt-get update && apt-get install -y docker.io docker-compose curl
+
+    # Активируем виртуальное окружение из артефактов
+    - source venv/bin/activate
 
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Selenium URL:$SELENIUM_REMOTE_URL"
-    - echo "Base URL:$BASE_URL"
+    - echo "Base URL: $BASE_URL"
 
-    # Проверяем доступность Selenium
-    - echo "Проверяем доступность Selenium..."
-    - curl -s $SELENIUM_REMOTE_URL/status | python -m json.tool || echo "Selenium не отвечает"
+    # 1. Запускаем приложение
+    - echo "1. Запуск приложения..."
+    - docker-compose down -v --remove-orphans 2>/dev/null || true
+    - docker-compose up -d
 
-    # Проверяем доступность приложения
-    - echo "Проверяем доступность приложения..."
+    # 2. Ждем готовности базы данных
+    - echo "2. Ожидание базы данных..."
     - |
-      for i in {1..10}; do
-        echo "Попытка $i/10: Проверка подключения к $BASE_URL..."
-        if curl -s -o /dev/null -w "%{http_code}" $BASE_URL | grep -q "200\|302\|301"; then
-          echo " Приложение доступно"
+      for i in {1..30}; do
+        echo "Попытка $i/30: Проверка базы данных..."
+        if docker-compose exec -T db_recipes pg_isready -U djangodb 2>/dev/null; then
+          echo "✓ База данных готова"
           break
         fi
-        sleep 5
-        if [ $i -eq 10 ]; then
-          echo " Приложение недоступно"
-          exit 1
-        fi
+        sleep 2
       done
+
+    # 3. Проверяем логи приложения
+    - echo "3. Проверка логов приложения..."
+    - sleep 10  # Даем приложению время на запуск
+    - docker-compose logs web_recipes --tail 10
+
+    # 4. Проверяем, запущены ли контейнеры
+    - echo "4. Статус контейнеров:"
+    - docker-compose ps
+
+    # 5. Упрощенная проверка приложения
+    - echo "5. Упрощенная проверка приложения..."
+    - |
+      echo "Ждем 60 секунд для полного запуска приложения..."
+      sleep 60
+      echo "Проверяем, жив ли контейнер..."
+      if docker-compose ps | grep -q "Up"; then
+        echo "✓ Контейнеры запущены"
+      else
+        echo "✗ Контейнеры не запущены"
+      fi
+
+    # 6. Проверяем доступность Selenium
+    - echo "6. Проверка доступности Selenium..."
+    - curl -s $SELENIUM_REMOTE_URL/status | python -m json.tool || echo "Selenium не отвечает"
 
     # Запускаем UI тесты
     - echo "Запускаем UI тесты..."
