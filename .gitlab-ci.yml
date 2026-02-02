@@ -292,12 +292,17 @@ deploy_application:
 
 # Этап 3: Запуск API тестов
 test_api:
-  stage: test
-  image: python:3.11-alpine  # ← ТВОЙ ВЫБОР!
+  stage: test_api
+  image: python:3.11-alpine
 
   # Если нужен Docker
   services:
     - docker:dind
+  needs:
+    - job: prepare_dependencies
+      artifacts: true  # ← Берем артефакты из prepare_dependencies
+    - job: deploy_application
+      artifacts: true  # ← Берем артефакты из deploy_application
 
   variables:
     DOCKER_HOST: tcp://docker:2375
