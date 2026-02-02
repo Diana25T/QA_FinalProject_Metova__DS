@@ -337,6 +337,15 @@ test_api:
     - echo "Ждем 60 секунд пока приложение полностью запустится..."
     - sleep 60
 
+    # Проверяем какие порты слушает контейнер
+    - echo "Порты контейнера web_recipes:"
+    - docker-compose port web_recipes 80 || echo "Порт 80 не проброшен"
+    - docker-compose port web_recipes 8080 || echo "Порт 8080 не проброшен"
+
+    # Смотрим детальную информацию
+    - echo "Инспектируем контейнер:"
+    - docker inspect qa_finalproject_metova-web_recipes-1 | grep -A10 "Ports"
+
     # Проверяем что запустилось
     - echo "Проверяем контейнеры:"
     - docker-compose ps
@@ -384,38 +393,51 @@ test_ui:
       alias: selenium-standalone-chrome
   variables:
     # Переменная для фикстуры
-    BASE_URL: "http://web_recipes:80"
+    BASE_URL: "http://localhost:80"
     SELENIUM_REMOTE_URL: "http://selenium-standalone-chrome:4444/wd/hub"
     CI: "true"
   needs:
-    - prepare_dependencies
-    - deploy_application  # Зависимость от запущенного приложения
+    - job: prepare_dependencies
+      artifacts: true
+    - job: deploy_application
+      artifacts: true
+
   before_script:
-    # Активируем виртуальное окружение
-    - source venv/bin/activate
-    # Ждем запуска Selenium сервиса
-    - sleep 10  # Даем время Selenium запуститься
-    # Проверяем доступность Selenium
-    - curl -s http://selenium-standalone-chrome:4444/wd/hub/status|grep '"ready":true' || echo "Selenium не готов"
+      - echo "Устанавливаем зависимости..."
+      - pip install --upgrade pip
+      - pip install -r requirements.txt
 
-    #  Проверяем доступность приложения
-    - echo "Проверка доступности приложения для UI тестов..."
-    - |
-       for i in {1..10}; do
-        if curl -s -f http://localhost:80 > /dev/null; then
-          echo " Приложение доступно после $i попыток"
-          break
-        fi
-        echo " Попытка $i: Приложение недоступно"
-        sleep 3
-        done
+      # Устанавливаем curl для проверки
+      - apt-get update && apt-get install -y curl
+
   script:
-    # Выводим информацию о локальном тестировании
-    - echo "Запускаем UI тесты на ЛОКАЛЬНОМ приложении $BASE_URL"
-    - echo "Используем Selenium по адресу $SELENIUM_REMOTE_URL"
+      # 1. Запускаем приложение для UI тестов
+      - echo "Запускаем приложение для UI тестов..."
+      - docker-compose up -d
 
+      # 2. Ждем запуска приложения
+      - echo "Ждем запуска приложения (60 секунд)..."
+      - sleep 60
+
+      # 3. Проверяем приложение
+      - echo "Проверяем приложение..."
+      - curl -f http://localhost:80 || echo "Приложение проверено"
+
+      # 4. Проверяем SELENIUM
+      - echo "Ждем Selenium (30 секунд)..."
+      - sleep 30
+      - curl -s http://selenium-chrome:4444/wd/hub/status | grep '"ready":true' || echo "Selenium проверка"
+
+      # 5. Запускаем тесты
+      - echo "Запускаем UI тесты..."
+      - BASE_URL="$BASE_URL" SELENIUM_REMOTE_URL="$SELENIUM_REMOTE_URL" pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
     # Запускаем UI тесты с локальным URL
-    - pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml --base-url=$BASE_URL
+    #- pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml --base-url=$BASE_URL
+
+  after_script:
+    - echo "Останавливаем приложение..."
+    - docker-compose down -v || true
+
   artifacts:
     when: always
     paths:
