@@ -291,92 +291,27 @@ deploy_application:
       - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Этап 3: Запуск API тестов
-# Этап 3: Запуск API тестов
 test_api:
-  stage: test_api
-  image: docker:latest  # Используем Docker образ вместо Python
+  stage: test
+  image: python:3.11-alpine  # ← ТВОЙ ВЫБОР!
+
+  # Если нужен Docker
   services:
     - docker:dind
+
   variables:
-    BASE_URL: "http://web_recipes:80"  # Используем имя сервиса в сети Docker
-  needs:
-    - job: prepare_dependencies
-      artifacts: true
-    - job: deploy_application
-      artifacts: true
-  before_script:
-    # Устанавливаем Python и зависимости в Docker контейнере
-    - apk add --no-cache python3 py3-pip curl docker-compose
-    - python3 -m venv venv
-    - source venv/bin/activate
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+
+  script:
+    - python --version  # Проверяем что Python 3.11
     - pip install --upgrade pip
     - pip install -r requirements.txt
-    - pip install pytest pytest-html allure-pytest requests
 
-    # Загружаем артефакты из предыдущих заданий
-    - echo "Загружаем окружение из deploy_application..."
-    - source deploy.env || true
-
-    # Используем Docker Compose из deploy_application
-    - export DOCKER_HOST="tcp://docker:2375"
-    - export DOCKER_TLS_CERTDIR=""
-
-    # Проверяем состояние контейнеров
-    - echo "Проверка состояния контейнеров..."
-    - cd $CI_PROJECT_DIR
-    - docker-compose ps
-
-    # Проверяем доступность через имя сервиса в сети Docker
-    - |
-      echo "Проверка доступности через web_recipes:80..."
-      for i in {1..10}; do
-          # Пробуем подключиться изнутри сети Docker
-          if docker-compose exec -T web_recipes curl -s -f http://localhost > /dev/null 2>&1; then
-              echo "✓ Приложение доступно изнутри контейнера"
-              break
-          fi
-          
-          # Альтернативно: пробуем через docker exec с curl
-          if docker-compose exec -T web_recipes sh -c "which curl || (apk add --no-cache curl 2>/dev/null && curl -s -f http://localhost)" > /dev/null 2>&1; then
-              echo "✓ Приложение доступно"
-              break
-          fi
-          
-          echo "Попытка $i: недоступно"
-          sleep 3
-          
-          if [ $i -eq 10 ]; then
-              echo "✗ Приложение недоступно после 10 попыток"
-              echo "Диагностика:"
-              echo "1. Проверка Docker контейнеров:"
-              docker-compose ps
-              echo "2. Логи приложения:"
-              docker-compose logs web_recipes --tail 20
-              exit 1
-          fi
-      done
-  script:
-    - echo "Запускаем API тесты на $BASE_URL"
-    - echo "Пользователь:$TANDOOR_USERNAME"
-
-    # Проверяем, что тестовый модуль существует
-    - |
-      if [ -f "tests/test_api.py" ] || [ -d "tests" ]; then
-          echo "Тестовые файлы найдены"
-      else
-          echo "✗ Тестовые файлы не найдены"
-          exit 1
-      fi
-
-    # Запускаем тесты, используя переменную окружения BASE_URL
-    - |
-      cd $CI_PROJECT_DIR
-      pytest tests/ -m api -v \
-        --alluredir=allure-results-api \
-        --junitxml=junit-api.xml
+    - echo "Запуск тестов..."
+    - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
   artifacts:
     when: always
-    expire_in: 1 week
     paths:
       - allure-results-api/
       - junit-api.xml
