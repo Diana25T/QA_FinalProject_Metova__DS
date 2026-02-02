@@ -307,11 +307,16 @@ test_api:
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
+    BASE_URL: "http://localhost:80"
 
   script:
     - python --version  # Проверяем что Python 3.11
     - pip install --upgrade pip
     - pip install -r requirements.txt
+    - echo "Используем URL:$BASE_URL"
+    - docker-compose up -d
+    - sleep 30
+    - curl http://localhost:80 || echo "Проверка..."
 
     - echo "Запуск тестов..."
     - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
