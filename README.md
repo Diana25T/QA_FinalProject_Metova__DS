@@ -1,93 +1,268 @@
-# QA_FinalProject_Metova
+# Дипломный проект: автоматизация smoke-тестирования раздела Meal Plan веб-приложения Tandoor
+**Студент:** Диана 
+**Курс:** Тестировщик ПО 
+**Образовательная платформа:** EdusonAcademy
 
+## Описание проекта
 
+Проект представляет собой фреймворк для автоматизации smoke-тестирования раздела Meal Plan 
+веб-приложения Tandoor, которое позволяет управлять рецептами и планировать питание.
+Реализовано тестирование через API и пользовательский интерфейс с использованием 
+паттерна Page Object Model и их автоматический запуск через GitLab CI.
 
-## Getting started
+**Цели проекта:**
+- Проверка ключевых пользовательские сценарии
+- Обеспечение стабильности работы раздела Meal Plan
+- Интеграция тестирования в процесс CI/CD
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+**Технологии:**
+- Python 3.13
+- Pytest - фреймворк для тестирования
+- Requests - библиотека для HTTP-запросов
+- Selenium WebDriver - автоматизация браузера
+- Allure - генерация отчетов о тестировании
+- GitLab CI/CD - непрерывная интеграция и доставка
+- Docker - контейнеризация окружения
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Требования для запуска
 
-## Add your files
+**Системные требования:**
+- Python 3.11 или выше
+- Google Chrome (для UI тестов)
+- GitLab
+- Docker и Docker Compose (для локального запуска Tandoor)
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+**Переменные окружения:**
+Должны быть установлены следующие переменные:
+```
+BASE_URL=http://localhost:8080  # URL вашего Tandoor
+TANDOOR_TOKEN=your_bearer_token  # API токен
+TANDOOR_USERNAME=your_username   # Логин для UI
+TANDOOR_PASSWORD=your_password   # Пароль для UI
+```
+
+## Инструкции по установке и запуску
+
+### 1. Клонирование репозитория
+```bash
+git clone <your-repository-url>
+cd <project-directory>
+```
+
+### 2. Настройка виртуального окружения
+```bash
+# Создание виртуального окружения
+python -m venv venv
+
+# Активация (Windows)
+venv\Scripts\activate
+
+# Активация (Linux/Mac)
+source venv/bin/activate
+```
+
+### 3. Установка зависимостей
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 4. Настройка переменных окружения
+Создайте файл `.env` в корневой директории проекта:
+```env
+BASE_URL=http://localhost:8080
+TANDOOR_TOKEN=ваш_токен_из_tandoor
+TANDOOR_USERNAME=ваш_логин
+TANDOOR_PASSWORD=ваш_пароль
+```
+
+### 5. Получение API токена
+Существует два способа получения токена:
+
+**Способ 1: Через интерфейс Tandoor**
+1. Авторизуйтесь в Tandoor Recipes
+2. Перейдите в Settings → API
+3. Сгенерируйте новый токен или используйте существующий
+
+**Способ 2: Через API (если известны логин/пароль)**
+```python
+from api.client import TandoorAPIClient
+
+client = TandoorAPIClient()
+
+token = client.get_tandoor_token(username, password)
+print(f"Ваш токен: {token}")
+```
+
+### 6. Запуск тестов
+
+**Запуск всех тестов:**
+```bash
+pytest tests/ -v
+```
+
+**Запуск только API тестов:**
+```bash
+pytest tests/ -m api -v
+```
+
+**Запуск только UI тестов:**
+```bash
+pytest tests/ -m ui -v
+```
+
+**Запуск с генерацией Allure отчета:**
+```bash
+# Запуск тестов с сохранением результатов
+pytest tests/ -v --alluredir=allure-results
+
+# Генерация HTML отчета
+allure generate allure-results --clean -o allure-report
+
+# Открытие отчета в браузере
+allure open allure-report
+```
+
+### 7. Локальный запуск Tandoor (опционально)
+Для локального тестирования можно использовать Docker:
+```bash
+docker-compose up -d
+```
+
+## Структура проекта
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/dianametova-group/QA_FinalProject_Metova.git
-git branch -M main
-git push -uf origin main
+project/
+├── api/
+│   └── client.py               # Клиент для работы с API Tandoor
+├── pages/                      # Page Objects для UI тестов
+│   ├── __init__.py
+│   ├── base_page.py           # Базовый класс страницы
+│   ├── login_page.py          # Страница авторизации
+│   ├── meal_plan_page.py      # Страница планов питания
+│   ├── shopping_list_page.py  # Страница списка покупок
+│   └── components/
+│       └── header.py          # Компонент шапки
+├── tests/                      # Тесты
+│   ├── conftest.py            # Конфигурация и фикстуры Pytest
+│   ├── test_api.py            # API тесты
+│   ├── test_ui.py             # UI тесты
+│   └── test_login.py          # Тесты авторизации
+├── test_data/                  # Тестовые данные
+│   ├── recipe_links.json      # Ссылки для импорта рецептов
+│   └── imported_recipes.json  # Кеш импортированных рецептов
+├── .env.example               # Пример файла с переменными окружения
+├── .gitlab-ci.yml             # Конфигурация CI/CD
+├── requirements.txt           # Зависимости Python
+├── README.md                  # Эта документация
+└── pytest.ini                # Конфигурация Pytest
 ```
 
-## Integrate with your tools
+**Назначение ключевых папок:**
+- `api/` - содержит API клиент для взаимодействия с Tandoor
+- `pages/` - реализация паттерна Page Object Model
+- `tests/` - тестовые сценарии
+- `test_data/` - данные для тестирования и кеширование
 
-- [ ] [Set up project integrations](https://gitlab.com/dianametova-group/QA_FinalProject_Metova/-/settings/integrations)
+## Реализованные сценарии тестирования
 
-## Collaborate with your team
+### API тесты:
+1. **Аутентификация** - проверка Bearer Token авторизации
+2. **Рецепты** - создание, получение, импорт и удаление рецептов
+3. **Планы питания** - полный цикл CRUD операций
+4. **Списки покупок** - добавление и удаление позиций
+5. **Поиск дубликатов** - автоматическое обнаружение и удаление дублей
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### UI тесты:
+1. **Авторизация** - проверка успешного входа в систему
+2. **Создание планов питания** - через пользовательский интерфейс
+3. **Удаление планов** - с подтверждением через API
+4. **Интеграция с корзиной** - автоматическое добавление продуктов при создании планов
+5. **Навигация** - проверка работы основных элементов интерфейса
 
-## Test and Deploy
+## Список используемых библиотек
 
-Use the built-in continuous integration in GitLab.
+**Основные зависимости:**
+```txt
+pytest==7.4.3           # Фреймворк для тестирования
+requests==2.31.0        # HTTP-запросы к API
+selenium==4.15.2        # Автоматизация браузера
+allure-pytest==2.13.2   # Интеграция с Allure
+python-dotenv==1.0.0    # Работа с переменными окружения
+```
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+**Вспомогательные библиотеки:**
+```txt
+webdriver-manager==4.0.1  # Автоматическое управление драйверами
+pytest-html==4.1.1        # HTML отчеты Pytest
+pytest-xdist==3.5.0       # Параллельный запуск тестов
+```
 
-***
+**Для CI/CD:**
+```txt
+docker==6.1.3            # Работа с Docker (опционально)
+```
 
-# Editing this README
+## Пример файла с переменными окружения
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Создайте файл `.env` в корне проекта:
 
-## Suggestions for a good README
+```env
+# Обязательные переменные
+BASE_URL=https://app.tandoor.dev
+TANDOOR_TOKEN=YourToken
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+# Для UI тестов
+TANDOOR_USERNAME=testuser
+TANDOOR_PASSWORD=YourPassword
 
-## Name
-Choose a self-explaining name for your project.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## Инструкции по CI/CD
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Проект настроен для работы с GitLab CI/CD. Основные этапы пайплайна:
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+1. **Prepare** - установка зависимостей и настройка окружения
+2. **Test API** - запуск API тестов
+3. **Test UI** - запуск UI тестов с использованием Selenium
+4. **Report** - генерация Allure отчета
+5. **Deploy** - публикация отчета на GitLab Pages
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+**Для запуска в GitLab CI/CD:**
+1. Установите переменные окружения в GitLab: `BASE_URL`, `TANDOOR_TOKEN`, `TANDOOR_USERNAME`, `TANDOOR_PASSWORD`
+2. При push в ветку main или создании merge request запустится пайплайн
+3. После успешного выполнения Allure отчет будет доступен по адресу: `https://<username>.gitlab.io/<project-name>/`
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## Особенности проекта
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+1. **Кеширование импортированных рецептов** - чтобы избежать повторного импорта
+2. **Автоматическая очистка тестовых данных** - через фикстуры Pytest
+3. **Обработка ошибок** - при недоступности сервисов
+4. **Подробные Allure отчеты** - с шагами и скриншотами при падении
+5. **Поддержка headless режима** - для запуска в CI/CD окружении
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## Устранение неполадок
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### Общие проблемы:
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+**Проблема:** API возвращает 401 ошибку
+**Решение:** Проверьте правильность токена в переменной `TANDOOR_TOKEN`
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+**Проблема:** UI тесты падают с ошибками таймаута
+**Решение:** Увеличьте время ожидания в `conftest.py` или проверьте доступность Tandoor
 
-## License
-For open source projects, say how it is licensed.
+**Проблема:** Allure отчет не генерируется
+**Решение:** Убедитесь, что установлена Java и Allure командной строки
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Для разработчиков:
+
+При добавлении новых тестов:
+1. Используйте существующие фикстуры для создания тестовых данных
+2. Следуйте паттерну Page Object Model для UI тестов
+3. Добавляйте маркировки `@pytest.mark.api` или `@pytest.mark.ui`
+4. Обновляйте документацию при изменении API
+
+## Контакты и поддержка
+
+Проект разработан для автоматизации тестирования Tandoor Recipes. Для вопросов и предложений обратитесь к автору проекта или создайте issue в репозитории.

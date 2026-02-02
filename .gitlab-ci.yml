@@ -290,17 +290,23 @@ deploy_application:
       - if: '$CI_MERGE_REQUEST_ID'
       - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 3: Запуск API тестов
+# Этап 2: API тесты (запускаем приложение внутри job) - вариант 2
 test_api:
   stage: test_api
-  image: docker:latest
+  image: python:3.11
   services:
     - docker:dind
   needs:
     - prepare_dependencies
+  variables:
+    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache py3-pip docker-compose curl python3
-    - pip3 install -r requirements.txt
+    # Устанавливаем Docker клиент
+    - apt-get update && apt-get install -y docker.io docker-compose
+
+    # Активируем виртуальное окружение из артефактов
+    - source venv/bin/activate
 
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
@@ -310,36 +316,22 @@ test_api:
     - docker-compose down -v --remove-orphans 2>/dev/null || true
     - docker-compose up -d
 
-    # 2. Ждем готовности базы данных
-    - echo "2. Ожидание базы данных..."
+    # 2. Ждем готовности
+    - echo "2. Ожидание приложения..."
     - |
       for i in {1..30}; do
-        if docker-compose exec -T db_recipes pg_isready -U djangodb 2>/dev/null; then
-          echo "✓ База данных готова"
-          break
-        fi
-        echo "Попытка $i/30: База данных ещё не готова..."
-        sleep 2
-      done
-
-    # 3. Ждем готовности приложения (проверяем изнутри контейнера)
-    - echo "3. Ожидание приложения..."
-    - |
-      for i in {1..30}; do
-        # Проверяем изнутри контейнера, так как порт 80 проброшен только внутри Docker сети
         if docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
-          echo "✓ Приложение доступно внутри контейнера"
+          echo "✓ Приложение доступно"
           break
         fi
         echo "Попытка $i/30: Приложение ещё не готово..."
         sleep 5
       done
 
-    # 4. Запускаем API тесты (тесты должны подключаться через имя контейнера)
-    - echo "4. Запуск API тестов..."
-    # Устанавливаем переменную окружения для тестов
+    # 3. Запускаем API тесты
+    - echo "3. Запуск API тестов..."
     - export APP_URL="http://web_recipes:80"
-    - python3 -m pytest tests/api_tests/ -v --alluredir=allure-results-api --junitxml=junit-api.xml
+    - python -m pytest tests/api_tests/ -v --alluredir=allure-results-api --junitxml=junit-api.xml
 
   after_script:
     - docker-compose down -v
@@ -347,8 +339,8 @@ test_api:
   artifacts:
     when: always
     paths:
-      - allure-results-api/
-      - junit-api.xml
+    - allure-results-api/
+    - junit-api.xml
     reports:
       junit: junit-api.xml
 

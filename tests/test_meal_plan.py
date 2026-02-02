@@ -81,19 +81,50 @@ def test_delete_meal_plan(api_client, temporary_meal_plan):
 # ===ТЕСТЫ ДЛЯ СПИСКА ПОКУПОК===
 
 @pytest.mark.api
-@allure.title("Получение списка покупок, связанных с рецептами")
+@allure.title("Получение списка покупок, не связанных с рецептами")
 @allure.severity(allure.severity_level.NORMAL)
-def test_get_shopping_list(api_client):
+def test_get_shopping_list(api_client, entries_for_shopping_list):
     """Получает лист покупок"""
-    response = api_client.get_shopping_list_recipe()
-    data_json = response.get("json", [])
-    results = data_json.get('results', [])
+    # Фикстура entries_for_shopping_list это просто данные
+    # Создаем сначала запись
+    data = entries_for_shopping_list
+    create_response = api_client.create_shopping_list_entry(data)
+    assert create_response['status_code'] == 201, f"Ожидался код 201, получен {create_response.get('status_code')}"
+
+    # Сохраняем ID созданной записи
+    data_json = create_response.get("json", {})
+    shopping_list_id = data_json.get('id')
+    assert shopping_list_id is not None, "ID созданной записи не получен"
+
+    # Получаем весь список покупок
+    list_response = api_client.get_shopping_list_entry()
+    assert list_response['status_code'] == 200
+
+    list_data = list_response.get('json', {})
+    results = list_data.get('results', [])
+
+    # Проверяем что список не пустой
     assert len(results) > 0, "Список покупок пуст"
 
-    shopping_list_ids = [item["id"] for item in data_json["results"]]
-    recipe_names = [item["recipe_data"]["name"] for item in data_json["results"]]
-    assert shopping_list_ids is not None, "ID не получен"
-    print(f"Получены продукты c названием {recipe_names} и ID: {shopping_list_ids}")
+    # Находим нашу созданную запись в списке
+    found_entry = None
+    for entry in results:
+        if entry.get('id') == shopping_list_id:
+            found_entry = entry
+            break
+
+    # Проверяем, что запись найдена
+    assert found_entry is not None, f"Запись с ID {shopping_list_id} не найдена в списке покупок"
+
+    # Получаем название и ID добавленного продукта
+    assert found_entry.get('food',{}).get('name')== data['food']['name']
+    assert float(found_entry.get('amount', 0)) == float(data['amount'])
+    assert found_entry.get('unit', {}).get('name') == data['unit']['name']
+
+    # Очистка - удаляем созданную запись
+    if shopping_list_id:
+        cleanup_response = api_client.delete_shopping_list(shopping_list_id)
+        assert cleanup_response['status_code'] in [200, 204], f"Запись не удалена {cleanup_response.get('status_code')}"
 
 
 @pytest.mark.api
@@ -108,7 +139,7 @@ def test_add_to_shopping_list(api_client, temporary_shopping_list):
     assert data_json is not None, "Не получены данные ответа"
     assert isinstance(data_json, dict), f"Ожидался словарь, получен {type(data_json)}"
 
-    # Проверяем структуру ответа
+    # Проверяем структуру ответ(обязательные поля)
     assert data_json['food']['name'] == 'Масло', f"Ожидался продукт 'Масло', получен {data_json['food']['name']}"
     assert data_json['amount'] == 100, f"Ожидалось количество 100, получено {data_json['amount']}"
     assert data_json['unit']['name'] == 'грамм', f"Ожидалась единица 'грамм', получена {data_json['unit']['name']}"
