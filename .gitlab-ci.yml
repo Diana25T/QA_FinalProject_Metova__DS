@@ -179,7 +179,7 @@ deploy_application:
         
         # Проверяем, запущены ли процессы внутри контейнера
         if docker-compose exec -T web_recipes ps aux 2>/dev/null | grep -q gunicorn; then
-          echo "✓ Gunicorn запущен"
+          echo " Gunicorn запущен"
           
           # Проверяем, слушает ли Nginx порт 80
           if docker-compose exec -T web_recipes netstat -tln 2>/dev/null | grep -q ":80 "; then
@@ -293,46 +293,56 @@ deploy_application:
 # Этап 3: Запуск API тестов
 test_api:
   stage: test_api
-  image: python:3.11
+  image: docker:latest
+  services:
+    - docker:dind
   needs:
-    - job: prepare_dependencies
-      artifacts: true
-    - job: deploy_application
-      artifacts: true
-  variables:
-    BASE_URL: "http://localhost:80"
+    - prepare_dependencies
+  before_script:
+    - apk add --no-cache py3-pip docker-compose curl python3
+    - pip3 install -r requirements.txt
 
   script:
     - echo "=== ЗАПУСК API ТЕСТОВ ==="
-    - python --version
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
 
-    # Устанавливаем Docker клиент для проверки
-    - apt-get update && apt-get install -y docker.io curl
+    # 1. Запускаем приложение
+    - echo "1. Запуск приложения..."
+    - docker-compose down -v --remove-orphans 2>/dev/null || true
+    - docker-compose up -d
 
-    # Проверяем доступность приложения
-    - echo "Проверяем доступность приложения..."
-    - sleep 90
-
-    # Проверяем через curl
+    # 2. Ждем готовности базы данных
+    - echo "2. Ожидание базы данных..."
     - |
-      for i in {1..10}; do
-        echo "Попытка $i/10: Проверка подключения к localhost:80..."
-        if curl -s -o /dev/null -w "%{http_code}" http://localhost:80 | grep -q "200\|302\|301"; then
-          echo " Приложение доступно"
+      for i in {1..30}; do
+        if docker-compose exec -T db_recipes pg_isready -U djangodb 2>/dev/null; then
+          echo "✓ База данных готова"
           break
         fi
-        sleep 5
-        if [ $i -eq 10 ]; then
-          echo " Приложение недоступно"
-          exit 1
-        fi
+        echo "Попытка $i/30: База данных ещё не готова..."
+        sleep 2
       done
 
-    # Запускаем тесты
-    - echo "=== ЗАПУСК API ТЕСТОВ ==="
-    - python -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml --base-url=http://localhost:80
+    # 3. Ждем готовности приложения (проверяем изнутри контейнера)
+    - echo "3. Ожидание приложения..."
+    - |
+      for i in {1..30}; do
+        # Проверяем изнутри контейнера, так как порт 80 проброшен только внутри Docker сети
+        if docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
+          echo "✓ Приложение доступно внутри контейнера"
+          break
+        fi
+        echo "Попытка $i/30: Приложение ещё не готово..."
+        sleep 5
+      done
+
+    # 4. Запускаем API тесты (тесты должны подключаться через имя контейнера)
+    - echo "4. Запуск API тестов..."
+    # Устанавливаем переменную окружения для тестов
+    - export APP_URL="http://web_recipes:80"
+    - python3 -m pytest tests/api_tests/ -v --alluredir=allure-results-api --junitxml=junit-api.xml
+
+  after_script:
+    - docker-compose down -v
 
   artifacts:
     when: always
@@ -341,9 +351,6 @@ test_api:
       - junit-api.xml
     reports:
       junit: junit-api.xml
-  rules:
-    - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == "main"'
 
 # Этап 4: Запуск UI тестов
 test_ui:
