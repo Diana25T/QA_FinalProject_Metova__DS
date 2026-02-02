@@ -154,12 +154,12 @@ deploy_application:
       for i in $(seq 1 $MAX_RETRIES); do
         echo "Попытка $i/$MAX_RETRIES: Проверка готовности БД..."
         if docker-compose exec -T db_recipes pg_isready -U djangodb; then
-          echo "✓ База данных готова"
+          echo " База данных готова"
           break
         fi
         sleep 2
         if [ $i -eq $MAX_RETRIES ]; then
-          echo "✗ База данных не готова за $MAX_RETRIES попыток"
+          echo " База данных не готова за $MAX_RETRIES попыток"
           exit 1
         fi
       done
@@ -183,8 +183,8 @@ deploy_application:
           
           # Проверяем, слушает ли Nginx порт 80
           if docker-compose exec -T web_recipes netstat -tln 2>/dev/null | grep -q ":80 "; then
-            echo "✓ Nginx слушает порт 80"
-            echo "✓ Приложение успешно запущено!"
+            echo " Nginx слушает порт 80"
+            echo " Приложение успешно запущено!"
             
             # Дополнительная информация
             echo "=== ИНФОРМАЦИЯ О ЗАПУСКЕ ==="
@@ -204,7 +204,7 @@ deploy_application:
         sleep $WAIT_INTERVAL
         
         if [ $i -eq $((MAX_WAIT/WAIT_INTERVAL)) ]; then
-          echo "⚠ Приложение не прошло все проверки за $MAX_WAIT секунд, но может быть запущено частично"
+          echo " Приложение не прошло все проверки за $MAX_WAIT секунд, но может быть запущено частично"
           
           # Выводим полную диагностику
           echo "=== ПОЛНАЯ ДИАГНОСТИКА ==="
@@ -241,30 +241,30 @@ deploy_application:
       echo "1. Проверка через netcat (если доступен):"
       if which nc >/dev/null 2>&1; then
         if timeout 5 nc -z $(docker-compose ps -q web_recipes | head -1) 80 2>/dev/null; then
-          echo "✓ Порт 80 открыт (проверка через netcat)"
+          echo " Порт 80 открыт (проверка через netcat)"
         else
-          echo "✗ Порт 80 не отвечает на netcat"
+          echo " Порт 80 не отвечает на netcat"
         fi
       fi
       
       echo "2. Проверка через telnet (если доступен):"
       if which timeout >/dev/null 2>&1; then
         if timeout 5 bash -c "cat < /dev/null > /dev/tcp/$(echo $CONTAINER_IP | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+')/80" 2>/dev/null; then
-          echo "✓ Порт 80 отвечает"
+          echo " Порт 80 отвечает"
         else
-          echo "✗ Порт 80 не отвечает на TCP соединение"
+          echo " Порт 80 не отвечает на TCP соединение"
         fi
       fi
       
       echo "3. Проверка изнутри контейнера (устанавливаем curl):"
       if docker-compose exec -T web_recipes sh -c "which curl || (apk add --no-cache curl 2>/dev/null && which curl)" >/dev/null 2>&1; then
         if docker-compose exec -T web_recipes curl -s -f -o /dev/null http://localhost || docker-compose exec -T web_recipes curl -s -f -o /dev/null http://127.0.0.1; then
-          echo "✓ Приложение доступно изнутри контейнера"
+          echo " Приложение доступно изнутри контейнера"
         else
-          echo "✗ Приложение недоступно изнутри контейнера"
+          echo " Приложение недоступно изнутри контейнера"
         fi
       else
-        echo "⚠ Не удалось установить curl в контейнере"
+        echo " Не удалось установить curl в контейнере"
       fi
 
     # Сохраняем переменные окружения для следующих этапов
@@ -313,19 +313,19 @@ test_api:
 
     # Проверяем доступность приложения
     - echo "Проверяем доступность приложения..."
-    - sleep 10
+    - sleep 90
 
     # Проверяем через curl
     - |
       for i in {1..10}; do
         echo "Попытка $i/10: Проверка подключения к localhost:80..."
         if curl -s -o /dev/null -w "%{http_code}" http://localhost:80 | grep -q "200\|302\|301"; then
-          echo "✓ Приложение доступно"
+          echo " Приложение доступно"
           break
         fi
         sleep 5
         if [ $i -eq 10 ]; then
-          echo "✗ Приложение недоступно"
+          echo " Приложение недоступно"
           exit 1
         fi
       done
@@ -381,12 +381,12 @@ test_ui:
       for i in {1..10}; do
         echo "Попытка $i/10: Проверка подключения к $BASE_URL..."
         if curl -s -o /dev/null -w "%{http_code}" $BASE_URL | grep -q "200\|302\|301"; then
-          echo "✓ Приложение доступно"
+          echo " Приложение доступно"
           break
         fi
         sleep 5
         if [ $i -eq 10 ]; then
-          echo "✗ Приложение недоступно"
+          echo " Приложение недоступно"
           exit 1
         fi
       done
@@ -406,6 +406,7 @@ test_ui:
   rules:
     - if: '$CI_MERGE_REQUEST_ID'
     - if: '$CI_COMMIT_BRANCH == "main"'
+
 
 # Этап 5: Генерация отчета Allure
 generate_allure_report:
