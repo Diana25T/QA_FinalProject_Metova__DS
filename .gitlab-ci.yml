@@ -293,99 +293,47 @@ deploy_application:
 # Этап 3: Запуск API тестов
 test_api:
   stage: test_api
-  image: python:3.11-alpine
-
-  # Если нужен Docker
-  services:
-    - docker:dind
+  image: python:3.11
   needs:
     - job: prepare_dependencies
-      artifacts: true  # ← Берем артефакты из prepare_dependencies
+      artifacts: true
     - job: deploy_application
-      artifacts: true  # ← Берем артефакты из deploy_application
-
+      artifacts: true
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
     BASE_URL: "http://localhost:80"
 
-  before_script:
-    # Устанавливаем docker-compose
-    - echo "Устанавливаем необходимые пакеты..."
-    - apk add --no-cache docker-compose curl bash
-    - docker-compose --version
-    - curl --version
-    - echo "Готово!"
-
   script:
-    - echo "=== ПОДГОТОВКА ==="
+    - echo "=== ЗАПУСК API ТЕСТОВ ==="
     - python --version
     - pip install --upgrade pip
     - pip install -r requirements.txt
-    - echo "Базовый URL:$BASE_URL"
 
-    # Показываем что у нас есть
-    - echo "Текущая директория:$(pwd)"
-    - echo "Список файлов:"
-    - ls -la
+    # Устанавливаем Docker клиент для проверки
+    - apt-get update && apt-get install -y docker.io curl
 
-    # Запускаем приложение
-    - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ ==="
-    - docker-compose up -d
-
-    # Ждем запуска
-    - echo "Ждем 60 секунд пока приложение полностью запустится..."
-    - sleep 60
-
-    # Проверяем какие порты слушает контейнер
-    - echo "Порты контейнера web_recipes:"
-    - docker-compose port web_recipes 80 || echo "Порт 80 не проброшен"
-    - docker-compose port web_recipes 8080 || echo "Порт 8080 не проброшен"
-
-    # Смотрим детальную информацию
-    - echo "Инспектируем контейнер:"
-    - docker inspect qa_finalproject_metova-web_recipes-1 | grep -A10 "Ports"
-
-    # Проверяем внутри контейнера
-    - echo "Проверка внутри контейнера web_recipes:"
-    - docker-compose exec web_recipes sh -c "
-    - echo 'Проверяем порт 80:'
-    - nc -z localhost 80 && echo '✓ Порт 80 слушается' || echo '✗ Порт 80 не слушается'
-
-    - echo 'Проверяем Unix socket:'
-    - ls -la /run/tandoor.sock && echo '✓ Unix socket существует' || echo '✗ Unix socket не существует'
-      
-      echo 'Проверяем процессы:'
-      ps aux | grep gunicorn
-      " || echo "Не удалось выполнить проверку"
-
-    # Проверяем что запустилось
-    - echo "Проверяем контейнеры:"
-    - docker-compose ps
-    - echo "Логи приложения (первые 20 строк):"
-    - docker-compose logs --tail=20 web_recipes || true
-
-    # Проверяем доступность
+    # Проверяем доступность приложения
     - echo "Проверяем доступность приложения..."
-    - curl -s -o /dev/null -w "%{http_code}" http://localhost:80 || echo "Не удалось подключиться"
-    - curl -I http://localhost:80 || echo "Проверка HTTP заголовков"
+    - sleep 10
 
-    # Пробуем получить ответ от API
-    - echo "=== ПРОВЕРКА API ==="
-    - curl -s http://localhost:80/api/ || echo "API не ответил"
-    - curl -s http://localhost:80/api/recipe/ || echo "Recipe API не ответил"
+    # Проверяем через curl
+    - |
+      for i in {1..10}; do
+        echo "Попытка $i/10: Проверка подключения к localhost:80..."
+        if curl -s -o /dev/null -w "%{http_code}" http://localhost:80 | grep -q "200\|302\|301"; then
+          echo "✓ Приложение доступно"
+          break
+        fi
+        sleep 5
+        if [ $i -eq 10 ]; then
+          echo "✗ Приложение недоступно"
+          exit 1
+        fi
+      done
 
     # Запускаем тесты
-    - echo "=== ЗАПУСК ТЕСТОВ ==="
-    - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
+    - echo "=== ЗАПУСК API ТЕСТОВ ==="
+    - python -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml --base-url=http://localhost:80
 
-  after_script:
-    # Останавливаем приложение
-    - echo "Останавливаем приложение..."
-    - docker-compose down || true
-
-    - echo "Запуск тестов..."
-    - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
   artifacts:
     when: always
     paths:
@@ -400,56 +348,52 @@ test_api:
 # Этап 4: Запуск UI тестов
 test_ui:
   stage: test_ui
-  image: python:3.11  # Используем Python образ, а не Selenium
-  services:
-    - name: selenium/standalone-chrome:latest
-      alias: selenium-standalone-chrome
-  variables:
-    # Переменная для фикстуры
-    BASE_URL: "http://localhost:80"
-    SELENIUM_REMOTE_URL: "http://selenium-standalone-chrome:4444/wd/hub"
-    CI: "true"
+  image: python:3.11
   needs:
     - job: prepare_dependencies
       artifacts: true
     - job: deploy_application
       artifacts: true
+  services:
+    - selenium/standalone-chrome:latest
+  variables:
+    BASE_URL: "http://localhost:80"
+    SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"
 
   before_script:
-      - echo "Устанавливаем зависимости..."
-      - pip install --upgrade pip
-      - pip install -r requirements.txt
-
-      # Устанавливаем curl для проверки
-      - apt-get update && apt-get install -y curl
+    # Устанавливаем дополнительные пакеты
+    - apt-get update && apt-get install -y curl wget
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
 
   script:
-      # 1. Запускаем приложение для UI тестов
-      - echo "Запускаем приложение для UI тестов..."
-      - docker-compose up -d
+    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
+    - echo "Selenium URL:$SELENIUM_REMOTE_URL"
+    - echo "Base URL:$BASE_URL"
 
-      # 2. Ждем запуска приложения
-      - echo "Ждем запуска приложения (60 секунд)..."
-      - sleep 60
+    # Проверяем доступность Selenium
+    - echo "Проверяем доступность Selenium..."
+    - curl -s $SELENIUM_REMOTE_URL/status | python -m json.tool || echo "Selenium не отвечает"
 
-      # 3. Проверяем приложение
-      - echo "Проверяем приложение..."
-      - curl -f http://localhost:80 || echo "Приложение проверено"
+    # Проверяем доступность приложения
+    - echo "Проверяем доступность приложения..."
+    - |
+      for i in {1..10}; do
+        echo "Попытка $i/10: Проверка подключения к $BASE_URL..."
+        if curl -s -o /dev/null -w "%{http_code}" $BASE_URL | grep -q "200\|302\|301"; then
+          echo "✓ Приложение доступно"
+          break
+        fi
+        sleep 5
+        if [ $i -eq 10 ]; then
+          echo "✗ Приложение недоступно"
+          exit 1
+        fi
+      done
 
-      # 4. Проверяем SELENIUM
-      - echo "Ждем Selenium (30 секунд)..."
-      - sleep 30
-      - curl -s http://selenium-chrome:4444/wd/hub/status | grep '"ready":true' || echo "Selenium проверка"
-
-      # 5. Запускаем тесты
-      - echo "Запускаем UI тесты..."
-      - BASE_URL="$BASE_URL" SELENIUM_REMOTE_URL="$SELENIUM_REMOTE_URL" pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
-    # Запускаем UI тесты с локальным URL
-    #- pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml --base-url=$BASE_URL
-
-  after_script:
-    - echo "Останавливаем приложение..."
-    - docker-compose down -v || true
+    # Запускаем UI тесты
+    - echo "Запускаем UI тесты..."
+    - python -m pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml --base-url=$BASE_URL
 
   artifacts:
     when: always
@@ -466,6 +410,7 @@ test_ui:
 # Этап 5: Генерация отчета Allure
 generate_allure_report:
   stage: report
+  image: python:3.11
   needs:
     - job: test_api
       artifacts: true
@@ -478,6 +423,9 @@ generate_allure_report:
     - java --version
     - allure --version
 
+    # Устанавливаем зависимости
+    - pip install allure-pytest
+
     # Объединяем результаты API и UI тестов
     - mkdir -p allure-results-combined
 
@@ -485,27 +433,19 @@ generate_allure_report:
     - if [ -d "allure-results-api" ]; then
         echo "Копируем результаты API тестов..."
         cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || true
-      else
-        echo "Директория allure-results-api не найдена"
       fi
 
     # Копируем результаты UI тестов
     - if [ -d "allure-results-ui" ]; then
         echo "Копируем результаты UI тестов..."
         cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || true
-      else
-        echo "Директория allure-results-ui не найдена"
       fi
 
     # Генерируем HTML отчет
-    - echo "Содержимое allure-results-combined:"
-    - find allure-results-combined -type f 2>/dev/null | head -5 || echo "Директория пуста"
-
     - allure generate allure-results-combined --clean -o public
 
     # Проверяем что отчет создан
-    - echo "Содержимое public:"
-    - ls -la public/
+    - echo "Allure отчет создан в директории public"
 
   artifacts:
     paths:
@@ -518,17 +458,22 @@ generate_allure_report:
 # Этап 6: остановка контейнеров
 cleanup:
   stage: cleanup
+  image: docker:latest
+  services:
+    - docker:dind
   needs:
     - test_api
     - test_ui
   script:
     - echo "Остановка Docker контейнеров..."
+    - apk add --no-cache docker-compose
+    - export DOCKER_HOST="tcp://docker:2375"
+    - export DOCKER_TLS_CERTDIR=""
     - docker-compose down -v || true
-    - echo "Очистка Docker системы..."
-    - docker system prune -f || true
-  when: always  # Всегда выполняем очистку
+    - echo "Очистка завершена"
+  when: always
 
-# Этап 6: Публикация отчета на GitLab Pages
+# Этап 7: Публикация отчета на GitLab Pages
 pages:
   stage: deploy
   dependencies:
@@ -536,8 +481,9 @@ pages:
   script:
     - echo "Публикация Allure отчета на GitLab Pages..."
     - echo "Отчет будет доступен по адресу:https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME"
+    - mv public public_html || true
   artifacts:
     paths:
       - public
   only:
-    - main  # Публикуем отчет только для ветки main
+    - main
