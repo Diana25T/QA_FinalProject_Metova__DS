@@ -309,14 +309,57 @@ test_api:
     DOCKER_TLS_CERTDIR: ""
     BASE_URL: "http://localhost:80"
 
+  before_script:
+    # Устанавливаем docker-compose
+    - echo "Устанавливаем docker-compose..."
+    - apk add --no-cache docker-compose
+    - docker-compose --version
+    - echo "Готово!"
+
   script:
-    - python --version  # Проверяем что Python 3.11
+    - echo "=== ПОДГОТОВКА ==="
+    - python --version
     - pip install --upgrade pip
     - pip install -r requirements.txt
-    - echo "Используем URL:$BASE_URL"
+    - echo "Базовый URL:$BASE_URL"
+
+    # Показываем что у нас есть
+    - echo "Текущая директория:$(pwd)"
+    - echo "Список файлов:"
+    - ls -la
+
+    # Проверяем что docker-compose.yml на месте
+    - echo "Проверяем docker-compose.yml:"
+    - ls -la docker-compose.yml || echo "Файл не найден!"
+    - echo "Первые строки docker-compose.yml:"
+    - head -10 docker-compose.yml
+
+    # Запускаем приложение
+    - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ ==="
     - docker-compose up -d
+
+    # Ждем запуска
+    - echo "Ждем 30 секунд пока приложение запустится..."
     - sleep 30
-    - curl http://localhost:80 || echo "Проверка..."
+
+    # Проверяем что запустилось
+    - echo "Проверяем контейнеры:"
+    - docker-compose ps
+    - docker ps
+
+    # Проверяем доступность
+    - echo "Проверяем доступность приложения..."
+    - curl -s -o /dev/null -w "%{http_code}" http://localhost:80 || echo "Не удалось подключиться"
+    - curl -I http://localhost:80 || echo "Проверка HTTP заголовков"
+
+    # Запускаем тесты
+    - echo "=== ЗАПУСК ТЕСТОВ ==="
+    - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
+
+  after_script:
+    # Останавливаем приложение
+    - echo "Останавливаем приложение..."
+    - docker-compose down || true
 
     - echo "Запуск тестов..."
     - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
