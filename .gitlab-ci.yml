@@ -179,7 +179,7 @@ cleanup_containers:
 
 # Этап 7: Публикация отчета на GitLab Pages
 publish_report_to_pages:
-  stage: deploy
+  stage: report
   script:
     - echo "Публикация Allure отчета на GitLab Pages..."
     - mv public public_html || true
