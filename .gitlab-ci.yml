@@ -303,7 +303,7 @@ test_api:
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
-    BASE_URL: "http://localhost:80"
+    BASE_URL: "http://172.19.0.3:80"
 
   before_script:
     # Устанавливаем docker-compose
@@ -333,7 +333,7 @@ test_api:
     - |
       echo "Ожидание запуска приложения..."
       for i in {1..30}; do
-        if curl -s -f http://localhost:80 > /dev/null; then
+        if curl -s -f http://172.19.0.3:80 > /dev/null; then
           echo "Приложение запущено!"
           break
         fi
@@ -357,7 +357,7 @@ test_api:
     - echo "Проверка внутри контейнера web_recipes:"
     - docker-compose exec web_recipes sh -c "
       echo 'Проверяем порт 80:'
-      nc -z localhost 80 && echo '✓ Порт 80 слушается' || echo '✗ Порт 80 не слушается'
+      nc -z http://172.19.0.3:80 && echo '✓ Порт 80 слушается' || echo '✗ Порт 80 не слушается'
       
       echo 'Проверяем Unix socket:'
       ls -la /run/tandoor.sock && echo '✓ Unix socket существует' || echo '✗ Unix socket не существует'
@@ -374,7 +374,7 @@ test_api:
 
     # Проверяем доступность
     - echo "Проверка доступности приложения..."
-    - curl -v http://localhost:80/api/recipe || echo "API не доступен"
+    - curl -v http://172.19.0.3:80/api/recipe || echo "API не доступен"
     - docker-compose ps
     - echo "Проверка сети внутри контейнера..."
     - echo "Проверка журналов контейнеров..."
@@ -382,8 +382,8 @@ test_api:
 
     # Пробуем получить ответ от API
     - echo "=== ПРОВЕРКА API ==="
-    - curl -s http://localhost:80/api/ || echo "API не ответил"
-    - curl -s http://localhost:80/recipe/ || echo "Recipe API не ответил"
+    - curl -s http://172.19.0.3:80/api/ || echo "API не ответил"
+    - curl -s http://172.19.0.3:80/recipe/ || echo "Recipe API не ответил"
 
     # После установки пакетов:
     - echo "Проверка BASE_URL в тестах:"
