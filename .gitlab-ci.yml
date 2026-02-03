@@ -307,7 +307,7 @@ test_api:
   variables:
     DOCKER_HOST: tcp://docker:2375
     DOCKER_TLS_CERTDIR: ""
-    BASE_URL: "http://localhost:80"
+    BASE_URL: "http://web_recipes:80"
 
   before_script:
     # Устанавливаем docker-compose
@@ -336,6 +336,7 @@ test_api:
     # Ждем запуска
     - echo "Ждем 60 секунд пока приложение полностью запустится..."
     - sleep 60
+
 
     # Проверяем какие порты слушает контейнер
     - echo "Порты контейнера web_recipes:"
@@ -366,14 +367,20 @@ test_api:
     - docker-compose logs --tail=20 web_recipes || true
 
     # Проверяем доступность
-    - echo "Проверяем доступность приложения..."
-    - curl -s -o /dev/null -w "%{http_code}" http://localhost:80 || echo "Не удалось подключиться"
-    - curl -I http://localhost:80 || echo "Проверка HTTP заголовков"
+    - echo "Проверка доступности приложения..."
+    - curl -v http://web_recipes:80/api/recipe
+    - docker-compose ps
+    - docker-compose logs web_recipes
+    - echo "Проверка сети внутри контейнера..."
+    - docker-compose exec web_recipes ip route show
+    - docker-compose exec web_recipes ping -c 4 web_recipes
+    - echo "Проверка журналов контейнеров..."
+    - docker-compose logs web_recipes
 
     # Пробуем получить ответ от API
     - echo "=== ПРОВЕРКА API ==="
-    - curl -s http://localhost:80/api/ || echo "API не ответил"
-    - curl -s http://localhost:80/api/recipe/ || echo "Recipe API не ответил"
+    - curl -s http://web_recipes:80/api/ || echo "API не ответил"
+    - curl -s http://web_recipes:80/api/recipe/ || echo "Recipe API не ответил"
 
     # Запускаем тесты
     - echo "=== ЗАПУСК ТЕСТОВ ==="
@@ -384,8 +391,6 @@ test_api:
     - echo "Останавливаем приложение..."
     - docker-compose down || true
 
-    - echo "Запуск тестов..."
-    - python3 -m pytest tests/ -m api -v --alluredir=allure-results-api --junitxml=junit-api.xml
   artifacts:
     when: always
     paths:
