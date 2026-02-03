@@ -435,7 +435,7 @@ test_ui:
   script:
     - echo "=== ЗАПУСК UI ТЕСТОВ ==="
     - echo "Selenium URL:$SELENIUM_REMOTE_URL"
-    - echo "Base URL: $BASE_URL"
+    - echo "Base URL:$BASE_URL"
 
     # 1. Запускаем приложение
     - echo "1. Запуск приложения..."
