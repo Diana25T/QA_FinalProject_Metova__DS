@@ -1,4 +1,3 @@
-# .gitlab-ci.yml
 # Используем образ Python для большинства этапов
 image: python:3.11
 
@@ -10,7 +9,6 @@ variables:
   TANDOOR_PASSWORD: $TANDOOR_PASSWORD
   POSTGRES_PASSWORD: $POSTGRES_PASSWORD
   SECRET_KEY: $SECRET_KEY
-
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
   SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"  # Для использования services
   CI: "true"  # Обязательно установите это для фикстуры
@@ -23,39 +21,29 @@ cache:
     - venv/
     - .wdm/
 
-#Сервис Docker-in-Docker для запуска контейнеров
+# Сервис Docker-in-Docker для запуска контейнеров
 services:
   - docker:dind
+  - selenium/standalone-chrome:latest
 
-# Определяем этапы выполнения пайплайна
+# Этапы выполнения пайплайна
 stages:
   - prepare
-  - deploy_app # Этап запуска приложения
+  - build
   - test_api
   - test_ui
   - report
-  - cleanup  # Этап очистки
-  - deploy
+  - cleanup
 
-# Этап 1: Подготовка зависимостей и окружения
-prepare_dependencies:
+# Этап 1: Установка зависимостей и подготовки окружения
+prepare_environment:
   stage: prepare
   script:
     # Устанавливаем Java (требуется для Allure)
     - apt-get update
     - apt-get install -y default-jre-headless wget unzip curl gnupg
 
-     # Устанавливаем Docker клиент
-    - echo "Установка Docker клиента..."
-    - apt-get install -y ca-certificates curl gnupg lsb-release
-    - mkdir -p /etc/apt/keyrings
-    - curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-    - apt-get update
-    - apt-get install -y docker-ce-cli
-
     # Устанавливаем Docker Compose
-    - echo "Установка Docker Compose..."
     - curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     - chmod +x /usr/local/bin/docker-compose
     - docker-compose --version
@@ -69,69 +57,32 @@ prepare_dependencies:
     - pip install --cache-dir=$PIP_CACHE_DIR -r requirements.txt
     - pip install pytest pytest-html allure-pytest requests selenium webdriver-manager
 
-
     # Устанавливаем Allure командной строки
     - wget -q "https://github.com/allure-framework/allure2/releases/download/2.24.1/allure-2.24.1.tgz"
     - tar -xzf allure-2.24.1.tgz -C /opt/
     - ln -sf /opt/allure-2.24.1/bin/allure /usr/local/bin/allure
     - allure --version
 
-    # Проверяем что Java установлена
-    - java --version
-
   artifacts:
     paths:
       - venv/
       - /opt/allure-2.24.1/
     expire_in: 1 hour
-  rules:
-    - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 2:  Запуск приложения в Docker
-deploy_application:
-  stage: deploy_app
-  image: docker:latest
-  services:
-    - docker:dind
-  needs:
-    - prepare_dependencies
-  variables:
-    POSTGRES_PASSWORD: $POSTGRES_PASSWORD
-    SECRET_KEY: $SECRET_KEY
-    BASE_URL: "http://web_recipes:80"
+# Этап 2: Сборка и запуск приложения
+build_and_deploy:
+  stage: build
   script:
-    - echo "=== ЗАПУСК ПРИЛОЖЕНИЯ В DOCKER ==="
-
-    # Устанавливаем Docker Compose (в docker:latest его нет)
-    - apk add --no-cache py3-pip docker-compose curl  #  в docker:latest используется apk, не apt-get!
-    - docker-compose --version
-    - curl --version
-
-    # Настраиваем Docker
-    - export DOCKER_HOST="tcp://docker:2375"
-    - export DOCKER_TLS_CERTDIR=""
-
-    # Проверяем связь
-    - docker info || echo "Предупреждение:не удалось подключиться к Docker daemon"
-
-    # Проверяем связь с Docker daemon
-    - docker info || echo "Не удалось подключиться к Docker daemon"
-
-    # Очищаем всё перед запуском
+    # Очищаем предыдущие контейнеры
     - docker-compose down -v --remove-orphans 2>/dev/null || true
-    - docker network prune -f 2>/dev/null || true
 
-     # СОЗДАЕМ .env:
+    # Создаем .env файл с необходимыми переменными
     - |
-      cat > .env << EOF
-      # Django settings
+      cat > .env <<EOF
       SECRET_KEY=${SECRET_KEY}
       DEBUG=1
       ALLOWED_HOSTS=*,localhost,web_recipes,127.0.0.1,0.0.0.0
       CSRF_TRUSTED_ORIGINS=http://localhost,http://web_recipes
-      
-      # Database settings
       DB_ENGINE=django.db.backends.postgresql
       POSTGRES_HOST=db_recipes
       POSTGRES_PORT=5432
@@ -140,414 +91,97 @@ deploy_application:
       POSTGRES_DB=djangodb
       EOF
 
-    - echo "2. Содержимое .env файла:"
-    - cat .env
-
-      # Запуск приложения
-    - echo "Запуск docker-compose up..."
+    # Запускаем приложение
     - docker-compose up -d
 
-    # Ожидание готовности базы данных
-    - echo "Ожидание готовности базы данных..."
+    # Ожидаем готовности базы данных
     - |
       MAX_RETRIES=30
       for i in $(seq 1 $MAX_RETRIES); do
         echo "Попытка $i/$MAX_RETRIES: Проверка готовности БД..."
         if docker-compose exec -T db_recipes pg_isready -U djangodb; then
-          echo " База данных готова"
+          echo "✓ База данных готова"
           break
         fi
         sleep 2
         if [ $i -eq $MAX_RETRIES ]; then
-          echo " База данных не готова за $MAX_RETRIES попыток"
+          echo "❌ База данных не стала доступна за $MAX_RETRIES попыток"
           exit 1
         fi
       done
 
-    # === УПРОЩЕННАЯ ПРОВЕРКА ЗАПУСКА ПРИЛОЖЕНИЯ ===
+    # Проверяем готовность приложения
     - |
-      echo "Ожидание запуска приложения..."
-      MAX_WAIT=180
-      WAIT_INTERVAL=5
-      
-      for i in $(seq 1 $((MAX_WAIT/WAIT_INTERVAL))); do
-        echo "Попытка $i/$((MAX_WAIT/WAIT_INTERVAL)): Проверка состояния..."
-        
-        # Проверяем статус контейнера
-        CONTAINER_STATUS=$(docker-compose ps -q web_recipes 2>/dev/null | xargs docker inspect -f '{{.State.Status}}' 2>/dev/null || echo "неизвестен")
-        echo "Статус контейнера: $CONTAINER_STATUS"
-        
-        # Проверяем, запущены ли процессы внутри контейнера
-        if docker-compose exec -T web_recipes ps aux 2>/dev/null | grep -q gunicorn; then
-          echo " Gunicorn запущен"
-          
-          # Проверяем, слушает ли Nginx порт 80
-          if docker-compose exec -T web_recipes netstat -tln 2>/dev/null | grep -q ":80 "; then
-            echo " Nginx слушает порт 80"
-            echo " Приложение успешно запущено!"
-            
-            # Дополнительная информация
-            echo "=== ИНФОРМАЦИЯ О ЗАПУСКЕ ==="
-            echo "Время запуска: $(date)"
-            echo "Статус контейнеров:"
-            docker-compose ps
-            
-            # Проверяем логи на наличие ошибок
-            echo "Последние логи приложения (без django-vite сообщений):"
-            docker-compose logs web_recipes --tail 20 | grep -v "django-vite" || true
-            
-            break
-          fi
-        fi
-        
-        echo "Ожидание... ($((i*WAIT_INTERVAL))/$MAX_WAIT сек.)"
-        sleep $WAIT_INTERVAL
-        
-        if [ $i -eq $((MAX_WAIT/WAIT_INTERVAL)) ]; then
-          echo " Приложение не прошло все проверки за $MAX_WAIT секунд, но может быть запущено частично"
-          
-          # Выводим полную диагностику
-          echo "=== ПОЛНАЯ ДИАГНОСТИКА ==="
-          echo "1. Состояние всех контейнеров:"
-          docker-compose ps -a
-          
-          echo "2. Логи веб-контейнера:"
-          docker-compose logs web_recipes --tail 30
-          
-          echo "3. Проверка процессов в контейнере:"
-          docker-compose exec web_recipes ps aux 2>/dev/null || echo "Не удалось проверить процессы"
-          
-          echo "4. Проверка сетевых интерфейсов:"
-          docker-compose exec web_recipes ip addr 2>/dev/null || echo "Не удалось проверить сеть"
-          
-          echo "5. Проверка портов в контейнере:"
-          docker-compose exec web_recipes netstat -tln 2>/dev/null || echo "Не удалось проверить порты"
-          
-          # Продолжаем выполнение, так как приложение, скорее всего, запущено
-          echo "Продолжаем выполнение пайплайна..."
-          break
-        fi
+      until curl -s -f -o /dev/null http://web_recipes:80; do
+        echo "Ожидается старт приложения..."
+        sleep 5
       done
-
-    # === ПРОВЕРКА ДОСТУПНОСТИ ИЗ СЕТИ ===
-    - |
-      echo "=== ПРОВЕРКА СЕТЕВОЙ ДОСТУПНОСТИ ==="
-      
-      # Получаем IP адрес контейнера
-      CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $(docker-compose ps -q web_recipes) 2>/dev/null || echo "не_найден")
-      echo "IP адрес контейнера: $CONTAINER_IP"
-      
-      # Пробуем разные способы проверки доступности
-      echo "1. Проверка через netcat (если доступен):"
-      if which nc >/dev/null 2>&1; then
-        if timeout 5 nc -z $(docker-compose ps -q web_recipes | head -1) 80 2>/dev/null; then
-          echo " Порт 80 открыт (проверка через netcat)"
-        else
-          echo " Порт 80 не отвечает на netcat"
-        fi
-      fi
-      
-      echo "2. Проверка через telnet (если доступен):"
-      if which timeout >/dev/null 2>&1; then
-        if timeout 5 bash -c "cat < /dev/null > /dev/tcp/$(echo $CONTAINER_IP | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+\.[0-9]\+')/80" 2>/dev/null; then
-          echo " Порт 80 отвечает"
-        else
-          echo " Порт 80 не отвечает на TCP соединение"
-        fi
-      fi
-      
-      echo "3. Проверка изнутри контейнера (устанавливаем curl):"
-      if docker-compose exec -T web_recipes sh -c "which curl || (apk add --no-cache curl 2>/dev/null && which curl)" >/dev/null 2>&1; then
-        if docker-compose exec -T web_recipes curl -s -f -o /dev/null http://localhost || docker-compose exec -T web_recipes curl -s -f -o /dev/null http://127.0.0.1; then
-          echo " Приложение доступно изнутри контейнера"
-        else
-          echo " Приложение недоступно изнутри контейнера"
-        fi
-      else
-        echo " Не удалось установить curl в контейнере"
-      fi
-
-    # Сохраняем переменные окружения для следующих этапов
-    - echo "APP_URL=http://web_recipes:80" > deploy.env
-    - echo "BASE_URL=http://web_recipes:80" >> deploy.env
-    - echo "DOCKER_NETWORK=$(docker network ls --filter name=qa_finalproject_metova --format '{{.Name}}' 2>/dev/null || echo 'default')" >> deploy.env
-    - docker-compose logs --no-color --tail 50 > docker_logs.txt
-
-    - echo "=== ИТОГОВЫЙ СТАТУС ==="
-    - echo "Контейнеры запущены:"
-    - docker-compose ps
-    - echo "Приложение готово для тестирования!"
+      echo "✓ Приложение стало доступно."
 
   artifacts:
-    when: always
     paths:
       - .env
       - docker-compose.yml
-      - deploy.env
-      - docker_logs.txt
-    expire_in: 1 week
-  rules:
-      - if: '$CI_MERGE_REQUEST_ID'
-      - if: '$CI_COMMIT_BRANCH == "main"'
+    expire_in: 1 day
 
-# Этап 2: API тесты (запускаем приложение внутри job) - вариант 2
-test_api:
+# Этап 3: Запуск API тестов
+run_api_tests:
   stage: test_api
-  image: python:3.11
-  services:
-    - docker:dind
-  needs:
-    - job: prepare_dependencies
-      artifacts: true
-    - job: deploy_application
-      artifacts: true
-  variables:
-    DOCKER_HOST: "tcp://docker:2375"
-    DOCKER_TLS_CERTDIR: ""
-  before_script:
-    # Устанавливаем Docker клиент
-    - apt-get update && apt-get install -y docker.io docker-compose
-
-    # Активируем виртуальное окружение из артефактов
-    - source venv/bin/activate
-
   script:
-    - echo "=== ЗАПУСК API ТЕСТОВ ==="
-
-    # 1. Запускаем приложение
-    - echo "1. Запуск приложения..."
-    - docker-compose down -v --remove-orphans 2>/dev/null || true
-    - docker-compose up -d
-
-    # 2. Ждем готовности
-    - echo "2. Ожидание приложения..."
-    - |
-      for i in {1..30}; do
-        if docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
-          echo "✓ Приложение доступно"
-          break
-        fi
-        echo "Попытка $i/30: Приложение ещё не готово..."
-        sleep 5
-      done
-
-   # 3. Проверяем логи приложения
-    - echo "3. Проверка логов приложения..."
-    - docker-compose logs web_recipes --tail 20
-
-    # 4. Проверяем процессы внутри контейнера
-    - echo "4. Проверка процессов в контейнере..."
-    - docker-compose exec web_recipes ps aux 2>/dev/null || echo "Не удалось проверить процессы"
-
-    # 5. Проверяем порты внутри контейнера
-    - echo "5. Проверка портов в контейнере..."
-    - docker-compose exec web_recipes netstat -tln 2>/dev/null || echo "Не удалось проверить порты"
-
-    # 6. Ждем готовности приложения (проверяем изнутри контейнера)
-    - echo "6. Ожидание приложения..."
-    - |
-      for i in {1..30}; do
-        echo "Попытка $i/30: Проверка приложения..."
-        # Проверяем несколькими способами
-        if docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
-          echo "✓ Приложение доступно внутри контейнера (через localhost)"
-          break
-        elif docker-compose exec -T web_recipes curl -s -f http://127.0.0.1:80 > /dev/null 2>&1; then
-          echo "✓ Приложение доступно внутри контейнера (через 127.0.0.1)"
-          break
-        elif docker-compose exec -T web_recipes wget -q --spider http://localhost:80 2>/dev/null; then
-          echo "✓ Приложение доступно (через wget)"
-          break
-        else
-          echo "Приложение ещё не готово..."
-          # Выводим логи для отладки
-          if [ $((i % 5)) -eq 0 ]; then
-            echo "--- Логи приложения (последние 5 строк) ---"
-            docker-compose logs web_recipes --tail 5
-          fi
-          sleep 5
-        fi
-      done
-
-    # 7. Если приложение не готово, продолжаем с диагностикой
-    - echo "7. Диагностика если приложение не доступно..."
-    - |
-      # Проверяем еще раз
-      if ! docker-compose exec -T web_recipes curl -s -f http://localhost:80 > /dev/null 2>&1; then
-        echo "Приложение всё ещё не доступно, но продолжаем..."
-        echo "=== ПОЛНАЯ ДИАГНОСТИКА ==="
-        echo "1. Состояние всех контейнеров:"
-        docker-compose ps -a
-        
-        echo "2. Логи веб-контейнера (последние 30 строк):"
-        docker-compose logs web_recipes --tail 30
-        
-        echo "3. Проверка сети в контейнере:"
-        docker-compose exec web_recipes ip addr 2>/dev/null || echo "Не удалось проверить сеть"
-        
-        echo "4. Проверка наличия gunicorn процессов:"
-        docker-compose exec web_recipes ps aux | grep -i gunicorn || echo "Gunicorn не найден"
-        
-        echo "5. Проверка наличия nginx процессов:"
-        docker-compose exec web_recipes ps aux | grep -i nginx || echo "Nginx не найден"
-      else
-        echo "✓ Приложение готово к тестированию"
-      fi
-    
-
-    # 3. Запускаем API тесты
-    - echo "3. Запуск API тестов..."
+    - source venv/bin/activate
     - export APP_URL="http://web_recipes:80"
     - python -m pytest tests/api_tests/ -v --alluredir=allure-results-api --junitxml=junit-api.xml
 
-  after_script:
-    - docker-compose down -v
-
   artifacts:
-    when: always
     paths:
-    - allure-results-api/
-    - junit-api.xml
+      - allure-results-api/
+      - junit-api.xml
     reports:
       junit: junit-api.xml
 
 # Этап 4: Запуск UI тестов
-test_ui:
+run_ui_tests:
   stage: test_ui
-  image: python:3.11
-  needs:
-    - job: prepare_dependencies
-      artifacts: true
-    - job: deploy_application
-      artifacts: true
-  services:
-    - selenium/standalone-chrome:latest
-  variables:
-    BASE_URL: "http://localhost:80"
-    SELENIUM_REMOTE_URL: "http://selenium__standalone-chrome:4444/wd/hub"
-
-  before_script:
-    # Устанавливаем дополнительные пакеты
-    - apt-get update && apt-get install -y curl wget
-    - pip install --upgrade pip
-    - pip install -r requirements.txt
-
   script:
-    - echo "=== ЗАПУСК UI ТЕСТОВ ==="
-    - echo "Selenium URL:$SELENIUM_REMOTE_URL"
-    - echo "Base URL:$BASE_URL"
-
-    # Проверяем доступность Selenium
-    - echo "Проверяем доступность Selenium..."
-    - curl -s $SELENIUM_REMOTE_URL/status | python -m json.tool || echo "Selenium не отвечает"
-
-    # Проверяем доступность приложения
-    - echo "Проверяем доступность приложения..."
-    - |
-      for i in {1..10}; do
-        echo "Попытка $i/10: Проверка подключения к $BASE_URL..."
-        if curl -s -o /dev/null -w "%{http_code}" $BASE_URL | grep -q "200\|302\|301"; then
-          echo " Приложение доступно"
-          break
-        fi
-        sleep 5
-        if [ $i -eq 10 ]; then
-          echo " Приложение недоступно"
-          exit 1
-        fi
-      done
-
-    # Запускаем UI тесты
-    - echo "Запускаем UI тесты..."
-    - python -m pytest tests/ -m ui -v --alluredir=allure-results-ui --junitxml=junit-ui.xml --base-url=$BASE_URL
+    - source venv/bin/activate
+    - export BASE_URL="http://web_recipes:80"
+    - python -m pytest tests/ui_tests/ -v --alluredir=allure-results-ui --junitxml=junit-ui.xml
 
   artifacts:
-    when: always
     paths:
       - allure-results-ui/
-      - screenshots-output/
       - junit-ui.xml
     reports:
       junit: junit-ui.xml
-  rules:
-    - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == "main"'
 
-
-# Этап 5: Генерация отчета Allure
+# Этап 5: Генерация общего отчета Allure
 generate_allure_report:
   stage: report
-  image: python:3.11
-  needs:
-    - job: test_api
-      artifacts: true
-    - job: test_ui
-      artifacts: true
   script:
-    - echo "Генерация объединенного Allure отчета..."
-
-    # Проверяем что Java установлена
-    - java --version
-    - allure --version
-
-    # Устанавливаем зависимости
-    - pip install allure-pytest
-
-    # Объединяем результаты API и UI тестов
+    - echo "Генерация объединённого Allure отчета..."
     - mkdir -p allure-results-combined
-
-    # Копируем результаты API тестов
-    - if [ -d "allure-results-api" ]; then
-        echo "Копируем результаты API тестов..."
-        cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || true
-      fi
-
-    # Копируем результаты UI тестов
-    - if [ -d "allure-results-ui" ]; then
-        echo "Копируем результаты UI тестов..."
-        cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || true
-      fi
-
-    # Генерируем HTML отчет
+    - cp -r allure-results-api/* allure-results-combined/ 2>/dev/null || true
+    - cp -r allure-results-ui/* allure-results-combined/ 2>/dev/null || true
     - allure generate allure-results-combined --clean -o public
-
-    # Проверяем что отчет создан
-    - echo "Allure отчет создан в директории public"
 
   artifacts:
     paths:
       - public/
     expire_in: 30 days
-  rules:
-    - if: '$CI_MERGE_REQUEST_ID'
-    - if: '$CI_COMMIT_BRANCH == "main"'
 
-# Этап 6: остановка контейнеров
-cleanup:
+# Этап 6: Остановка контейнеров
+cleanup_containers:
   stage: cleanup
-  image: docker:latest
-  services:
-    - docker:dind
-  needs:
-    - test_api
-    - test_ui
   script:
-    - echo "Остановка Docker контейнеров..."
-    - apk add --no-cache docker-compose
-    - export DOCKER_HOST="tcp://docker:2375"
-    - export DOCKER_TLS_CERTDIR=""
     - docker-compose down -v || true
     - echo "Очистка завершена"
   when: always
 
 # Этап 7: Публикация отчета на GitLab Pages
-pages:
-  stage: deploy
-  dependencies:
-    - generate_allure_report
+publish_report_to_pages:
+  stage: report
   script:
     - echo "Публикация Allure отчета на GitLab Pages..."
-    - echo "Отчет будет доступен по адресу:https://$CI_PROJECT_NAMESPACE.gitlab.io/$CI_PROJECT_NAME"
     - mv public public_html || true
   artifacts:
     paths:
