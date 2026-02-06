@@ -88,26 +88,6 @@ class TandoorAPIClient:
             print(f"Ошибка запроса: {e}")
             return {'status_code': None, 'error': str(e)}
 
-    def get_tandoor_token(self, username=None, password=None):
-        """Получает токен напрямую через requests"""
-        username = username or os.getenv('TANDOOR_USERNAME')
-        password = password or os.getenv('TANDOOR_PASSWORD')
-
-        url = f"{self.base_url}/api-token-auth/"
-        data = {"username": username, "password": password}
-
-        try:
-            response = requests.post(url, data=data, timeout=30)
-            if response.status_code == 200:
-                token = response.json().get('token')
-                if token:
-                    self.token = token
-                    return token
-        except Exception as e:
-            print(f"Ошибка получения токена: {e}")
-
-        return None
-
 # === МЕТОДЫ ДЛЯ РЕЦЕПТОВ ===
 
     @allure.step("Импорт рецепта по URL: '{recipe_url}'")
