@@ -16,7 +16,7 @@ stages:
   - setup
   - test
   - report
-  - deploygit remote remove origin
+  - deploy
 
 # 1. SETUP - Подготовка окружения
 setup-environment:
