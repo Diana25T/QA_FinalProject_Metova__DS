@@ -1,0 +1,1 @@
+[{"domain": "localhost", "expiry": 1799338670, "httpOnly": true, "name": "sessionid", "path": "/", "sameSite": "Lax", "secure": false, "value": "i4z5cpffphdw3ppb9lzlmd6w0gl3zelj"}, {"domain": "localhost", "expiry": 1799252270, "httpOnly": false, "name": "csrftoken", "path": "/", "sameSite": "Lax", "secure": false, "value": "wM50EZFz1LY9r658bBEqKY40zxBIqnrD"}]
