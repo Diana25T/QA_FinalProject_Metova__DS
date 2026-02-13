@@ -73,32 +73,33 @@
 
 ##  Структура проекта
 QA_FinalProject_Metova__DS/
+
+```
+project/
 ├── api/
-│ └── client.py
-├── pages/
-│ ├── base_page.py
-│ ├── login_page.py
-│ ├── meal_plan_page.py
-│ ├── shopping_list_page.py
-│ └── components/
-│ └── header.py
-├── tests/
-│ ├── conftest.py
-│ ├── test_api.py
-│ ├── test_ui.py
-│ └── test_login.py
-├── test_data/
-├── screenshots/
-├── .github/workflows/
-│ └── demo for portfolio.yml
-├── .env.example
-├── requirements.txt
-├── pytest.ini
-└── README.md
-
-text
-
----
+│   └── client.py               # Клиент для работы с API Tandoor
+├── pages/                      # Page Objects для UI тестов
+│   ├── __init__.py
+│   ├── base_page.py           # Базовый класс страницы
+│   ├── login_page.py          # Страница авторизации
+│   ├── meal_plan_page.py      # Страница планов питания
+│   ├── shopping_list_page.py  # Страница списка покупок
+│   └── components/
+│       └── header.py          # Компонент шапки
+├── tests/                      # Тесты
+│   ├── conftest.py            # Конфигурация и фикстуры Pytest
+│   ├── test_api.py            # API тесты
+│   ├── test_ui.py             # UI тесты
+│   └── test_login.py          # Тесты авторизации
+├── test_data/                  # Тестовые данные
+│   ├── recipe_links.json      # Ссылки для импорта рецептов
+│   └── imported_recipes.json  # Кеш импортированных рецептов
+├── .env.example               # Пример файла с переменными окружения
+├── .gitlab-ci.yml             # Конфигурация CI/CD
+├── requirements.txt           # Зависимости Python
+├── README.md                  # Эта документация
+└── pytest.ini                # Конфигурация Pytest
+```
 
 ##  Реализованные сценарии тестирования
 
@@ -160,11 +161,23 @@ pytest tests/ -m ui -v
 # С Allure отчётом
 pytest tests/ -v --alluredir=allure-results
 allure serve allure-results
-🔧 Устранение неполадок
-Проблема	Решение
-401 Unauthorized	Проверьте токен в .env
-Таймауты UI-тестов	Увеличьте timeout в conftest.py
-ModuleNotFoundError	Запускайте из корня проекта
-📞 Контакты
-GitHub: @Diana25T
-Репозиторий: QA_FinalProject_Metova__DS
+```
+##  Устранение неполадок
+
+| Проблема | Решение |
+|----------|---------|
+| **401 Unauthorized** | Проверьте правильность токена в переменной `TANDOOR_TOKEN` |
+| **Таймауты UI-тестов** | Увеличьте время ожидания в `conftest.py` или проверьте доступность Tandoor |
+| **ModuleNotFoundError** | Запускайте тесты из корневой директории проекта |
+| **ChromeDriver не найден** | Установите `webdriver-manager`: `pip install webdriver-manager` |
+| **Allure reports не генерируются** | Убедитесь, что установлен allure-pytest и Java |
+
+---
+
+##  Контакты
+
+**GitHub:** [@Diana25T](https://github.com/Diana25T)  
+**Репозиторий:** [QA_FinalProject_Metova__DS](https://github.com/Diana25T/QA_FinalProject_Metova__DS)
+
+---
+
