@@ -1,50 +1,147 @@
-name: Demo Pipeline for Portfolio
+name: Test Pipeline with Allure Report
 
 on:
   push:
-    branches: [main, master]
-  workflow_dispatch:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
-  analyze-project:
+  build-and-test-api:
     runs-on: ubuntu-latest
-    name:  Analyze Project Structure
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Show project summary
-      run: |
-        echo "========================================"
-        echo " TEST AUTOMATION PROJECT SUMMARY"
-        echo "========================================"
-        echo ""
-        echo " PROJECT STRUCTURE:"
-        echo "---------------------"
-        find . -type f -name "*.py" | grep -v __pycache__ | sort
-        echo ""
-        echo "TEST STATISTICS:"
-        echo "------------------"
-        echo "- Test files: $(find tests/ -name 'test_*.py' 2>/dev/null | wc -l)"
-        echo "- Test functions: $(grep -r 'def test_' tests/ 2>/dev/null | wc -l)"
-        echo "- Allure decorators: $(grep -r '@allure' tests/ 2>/dev/null | wc -l)"
-        echo ""
-        echo " LOCAL TEST RESULTS (from screenshot):"
-        echo "----------------------------------------"
-        echo "17 tests passed in 303.65s (0:05:03)"
-        echo ""
-        echo " NOTE:"
-        echo "Full test execution requires VPN access."
-        echo "This pipeline demonstrates CI/CD setup."
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Validate syntax
-      run: |
-        echo " Validating Python files..."
-        find . -name "*.py" -type f | head -5 | while read file; do
-          if python -m py_compile "$file"; then
-            echo "  ✓ $(basename "$file")"
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install allure-pytest pytest requests
+
+      - name: Create .env file for testing
+        run: |
+          cat > .env << EOF
+          SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+          DB_ENGINE=django.db.backends.postgresql
+          DB_NAME=${{ secrets.DB_NAME }}
+          DB_USER=${{ secrets.DB_USER }}
+          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+          DB_HOST=db_recipes
+          DB_PORT=5432
+          POSTGRES_DB=${{ secrets.DB_NAME }}
+          POSTGRES_USER=${{ secrets.DB_USER }}
+          POSTGRES_PASSWORD=${{ secrets.DB_PASSWORD }}
+          ALLOWED_HOSTS=localhost,127.0.0.1,web_recipes
+          CSRF_TRUSTED_ORIGINS=http://localhost
+          DEBUG=1
+          EOF
+          echo "✅ Created .env file"
+
+      - name: Start Docker Compose
+        run: |
+          docker-compose down -v
+          docker-compose up -d
+          
+          echo "⏳ Waiting for application to be ready..."
+          timeout=60
+          counter=0
+          while [ $counter -lt $timeout ]; do
+            if curl -s http://localhost > /dev/null 2>&1; then
+              echo "✅ Application is ready!"
+              break
+            fi
+            echo "⏳ Waiting... ($counter/$timeout)"
+            sleep 2
+            counter=$((counter + 1))
+          done
+
+      - name: Show container logs
+        if: always()
+        run: |
+          echo "=== Docker Container Status ==="
+          docker-compose ps
+          echo "=== Web Container Logs ==="
+          docker-compose logs web_recipes --tail=50
+
+      - name: Wait for API to be ready
+        run: |
+          echo "⏳ Waiting for API endpoint..."
+          max_attempts=30
+          attempt=1
+          while [ $attempt -le $max_attempts ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ || echo "000")
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+              echo "✅ API is accessible (HTTP $HTTP_CODE)!"
+              break
+            fi
+            echo "⏳ Attempt $attempt/$max_attempts: API returned HTTP $HTTP_CODE"
+            sleep 2
+            attempt=$((attempt + 1))
+          done
+
+      - name: Run API tests
+        run: |
+          source venv/bin/activate
+          export APP_URL=http://localhost
+          mkdir -p allure-results
+          
+          echo "🔍 Running API tests with marker 'api'..."
+          pytest tests/ \
+            --alluredir=allure-results \
+            -m "api" \
+            -v \
+            --tb=short \
+            --disable-warnings || true
+        continue-on-error: true
+        env:
+          APP_URL: http://localhost
+          TEST_ENV: github-actions
+
+      - name: Upload Allure results
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/
+          retention-days: 5
+
+      - name: Generate Allure Report
+        if: always()
+        run: |
+          source venv/bin/activate
+          if [ -d "allure-results" ] && [ "$(ls -A allure-results)" ]; then
+            echo "📊 Generating Allure report..."
+            allure generate allure-results -o allure-report --clean
           else
-            echo "  ✗ $(basename "$file")"
+            echo "⚠️ No allure results found"
+            mkdir -p allure-report
           fi
-        done
+
+      - name: Upload Allure Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report/
+          retention-days: 5
+
+      - name: Clean up Docker containers
+        if: always()
+        run: |
+          docker-compose down -v

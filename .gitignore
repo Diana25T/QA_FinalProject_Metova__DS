@@ -224,4 +224,8 @@ test_data/imported_recipes_cache.json
 imported_recipes_cache.json
 mediafiles/
 postgresql/
+.idea/git log --all --full-history -- .gitlab-ci.yml
+docker-compose.yml
+!docker-compose.example.yml
+!.env.example
 .idea/

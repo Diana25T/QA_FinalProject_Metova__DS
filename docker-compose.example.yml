@@ -1,0 +1,30 @@
+# docker-compose.example.yml - пример для копирования
+services:
+  db_recipes:
+    restart: always
+    image: postgres:16-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    env_file:
+      - .env
+
+  web_recipes:
+    restart: always
+    image: vabene1111/recipes
+    ports:
+      - "80:80"
+    env_file:
+      - .env
+    volumes:
+      - staticfiles:/opt/recipes/staticfiles
+      - ./mediafiles:/opt/recipes/mediafiles
+    depends_on:
+      - db_recipes
+
+volumes:
+  postgres_data:
+  staticfiles:

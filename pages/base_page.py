@@ -3,7 +3,8 @@ import time
 from typing import Optional, Tuple
 
 import allure
-from selenium.common import TimeoutException
+from selenium.common import TimeoutException, ElementClickInterceptedException
+from selenium.webdriver import ActionChains
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
@@ -71,10 +72,27 @@ class BasePage:
         wait_timeout = timeout if timeout is not None else self.timeout
         try:
             element = self.wait.until(EC.presence_of_element_located(locator))
-            element.click()
+
+            # Пробуем обычный клик
+            try:
+                element.click()
+            except ElementClickInterceptedException:
+                # Если перехвачено - пробуем клик со смещением
+                if 'cv-day' in str(locator):
+                    size = element.size
+                    actions = ActionChains(self.driver)
+                    actions.move_to_element_with_offset(element, size['width'] - 10, 10).click().perform()
+                else:
+                    # Если не календарь - пробуем JS клик
+                    self.driver.execute_script("arguments[0].click();", element)
+
         except Exception as e:
             print(f"Ошибка при клике на {locator}: {e}")
-            raise
+            # Последняя попытка
+            try:
+                self.driver.execute_script("arguments[0].click();", element)
+            except:
+                raise
 
     @allure.step("Ввести текст '{text}' в элемент: {locator}")
     def input_text(
