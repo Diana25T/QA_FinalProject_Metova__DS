@@ -52,19 +52,19 @@ jobs:
           CSRF_TRUSTED_ORIGINS=http://localhost
           DEBUG=1
           EOF
-          echo "✅ Created .env file"
+          echo " Created .env file"
 
       - name: Start Docker Compose
         run: |
-          docker-compose down -v
-          docker-compose up -d
+          docker compose down -v
+          docker compose up -d
           
-          echo "⏳ Waiting for application to be ready..."
+          echo " Waiting for application to be ready..."
           timeout=60
           counter=0
           while [ $counter -lt $timeout ]; do
             if curl -s http://localhost > /dev/null 2>&1; then
-              echo "✅ Application is ready!"
+              echo "Application is ready!"
               break
             fi
             echo "⏳ Waiting... ($counter/$timeout)"
@@ -76,22 +76,22 @@ jobs:
         if: always()
         run: |
           echo "=== Docker Container Status ==="
-          docker-compose ps
+          docker compose ps
           echo "=== Web Container Logs ==="
-          docker-compose logs web_recipes --tail=50
+          docker compose logs web_recipes --tail=50
 
       - name: Wait for API to be ready
         run: |
-          echo "⏳ Waiting for API endpoint..."
+          echo " Waiting for API endpoint..."
           max_attempts=30
           attempt=1
           while [ $attempt -le $max_attempts ]; do
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ || echo "000")
             if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
-              echo "✅ API is accessible (HTTP $HTTP_CODE)!"
+              echo " API is accessible (HTTP $HTTP_CODE)!"
               break
             fi
-            echo "⏳ Attempt $attempt/$max_attempts: API returned HTTP $HTTP_CODE"
+            echo " Attempt $attempt/$max_attempts: API returned HTTP $HTTP_CODE"
             sleep 2
             attempt=$((attempt + 1))
           done
@@ -102,7 +102,7 @@ jobs:
           export APP_URL=http://localhost
           mkdir -p allure-results
           
-          echo "🔍 Running API tests with marker 'api'..."
+          echo " Running API tests with marker 'api'..."
           pytest tests/ \
             --alluredir=allure-results \
             -m "api" \
@@ -126,10 +126,10 @@ jobs:
         run: |
           source venv/bin/activate
           if [ -d "allure-results" ] && [ "$(ls -A allure-results)" ]; then
-            echo "📊 Generating Allure report..."
+            echo " Generating Allure report..."
             allure generate allure-results -o allure-report --clean
           else
-            echo "⚠️ No allure results found"
+            echo " No allure results found"
             mkdir -p allure-report
           fi
 
@@ -144,4 +144,4 @@ jobs:
       - name: Clean up Docker containers
         if: always()
         run: |
-          docker-compose down -v
+          docker compose down -v
