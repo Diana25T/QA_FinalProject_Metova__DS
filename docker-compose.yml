@@ -1,0 +1,24 @@
+services:
+  db_recipes:
+    restart: always
+    image: postgres:16-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file:
+      - .env
+  web_recipes:
+    restart: always
+    image: vabene1111/recipes
+    ports:
+      - "80:80"
+    env_file:
+      - ./.env  # ← использует переменные из .env файла
+    volumes:
+      - staticfiles:/opt/recipes/staticfiles
+      - ./mediafiles:/opt/recipes/mediafiles
+    depends_on:
+      - db_recipes
+
+volumes:
+  postgres_data:
+  staticfiles:
