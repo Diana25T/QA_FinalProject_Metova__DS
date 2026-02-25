@@ -78,7 +78,7 @@ jobs:
 
       - name: Create test user and token
         run: |
-          docker compose exec -T web_recipes python manage.py shell << 'EOF'
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
           from django.contrib.auth.models import User
           from rest_framework.authtoken.models import Token
           # Создаем пользователя
@@ -99,7 +99,7 @@ jobs:
       - name: Set token from container
         run: |
           # Извлекаем токен из вывода команды (без показа в логах)
-          TOKEN=$(docker compose exec -T web_recipes python manage.py shell -c "
+          TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
           from django.contrib.auth.models import User
           from rest_framework.authtoken.models import Token
           user = User.objects.get(username='testuser')
