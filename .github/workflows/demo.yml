@@ -76,7 +76,6 @@ jobs:
           docker compose ps
           echo "=== Web Container Logs ==="
           docker compose logs web_recipes --tail=50
-          
 
       - name: Create test user and token
         run: |
