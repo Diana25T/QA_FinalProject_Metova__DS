@@ -110,8 +110,17 @@ jobs:
           user = User.objects.get(username='testuser')
           token = Token.objects.get(user=user)
           print(token.key) ")
-          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-
+          TOKEN=$(echo "$OUTPUT" | grep -E '^[a-f0-9]{40}$' | tail -1)
+          
+          if [ -n "$TOKEN" ]; then
+            echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+            echo " Token successfully extracted"
+          else
+            echo " Failed to extract token"
+            echo "$OUTPUT"
+            exit 1
+          fi
+          
       - name: Wait for API to be ready
         run: |
           echo " Waiting for API endpoint..."
