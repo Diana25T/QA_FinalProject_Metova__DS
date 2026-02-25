@@ -85,8 +85,8 @@ jobs:
           
           # Создаем пользователя
           user, created = User.objects.get_or_create(
-              username='testuser',
-              defaults={'email': 'test@example.com'}
+          username='testuser',
+          defaults={'email': 'test@example.com'}
           )
           if created:
               user.set_password('testpass123')
