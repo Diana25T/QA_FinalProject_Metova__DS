@@ -48,6 +48,8 @@ jobs:
           ALLOWED_HOSTS=localhost,127.0.0.1,web_recipes
           CSRF_TRUSTED_ORIGINS=http://localhost
           DEBUG=1
+              # API Token
+          TANDOOR_TOKEN=${{ secrets.TANDOOR_TOKEN }}
           EOF
           echo " Created .env file"
 
@@ -119,16 +121,14 @@ jobs:
           retention-days: 5
 
       - name: Generate Allure Report
+        uses: simple-elf/allure-report-action@master
         if: always()
-        run: |
-          source venv/bin/activate
-          if [ -d "allure-results" ] && [ "$(ls -A allure-results)" ]; then
-            echo " Generating Allure report..."
-            allure generate allure-results -o allure-report --clean
-          else
-            echo " No allure results found"
-            mkdir -p allure-report
-          fi
+        with:
+          allure_results: allure-results
+          allure_report: allure-report
+          gh_pages: public
+          allure_history: allure-history
+          keep_reports: 20
 
       - name: Upload Allure Report
         if: always()
