@@ -110,13 +110,14 @@ jobs:
           user = User.objects.get(username='testuser')
           token = Token.objects.get(user=user)
           print(token.key) ")
-          TOKEN=$(echo "$OUTPUT" | grep -E '^[a-f0-9]{40}$' | tail -1)
+           TOKEN=$(echo "$OUTPUT" | grep -E '^[a-f0-9]{40}$' | tail -1)
           
           if [ -n "$TOKEN" ]; then
             echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
             echo " Token successfully extracted"
           else
             echo " Failed to extract token"
+            echo "Raw output:"
             echo "$OUTPUT"
             exit 1
           fi
