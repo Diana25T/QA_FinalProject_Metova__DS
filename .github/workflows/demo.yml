@@ -86,19 +86,27 @@ jobs:
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
           from django.contrib.auth.models import User
           from rest_framework.authtoken.models import Token
-          # Создаем пользователя
-          user, created = User.objects.get_or_create(
+          # Удаляем старого пользователя если есть
+          User.objects.filter(username='testuser').delete()
+
+          # Создаем АКТИВНОГО пользователя с правами
+          user = User.objects.create_user(
           username='testuser',
-          defaults={'email': 'test@example.com'}
-          )
-          if created:
-              user.set_password('testpass123')
-              user.save()
-              print(" Тестовый пользователь создан")
-          
+          password='testpass123',
+          email='test@example.com',
+          is_active=True  
+           )
+
+          # Добавляем права (если нужны для API)
+          user.is_staff = False  
+          user.is_superuser = False
+          user.save()
+
+          print(f" Пользователь {user.username} создан (active={user.is_active})")
+
           # Создаем токен
-          token, _ = Token.objects.get_or_create(user=user)
-          print(" Токен создан")
+          token = Token.objects.create(user=user)
+          print(f" Токен: {token.key}")
           EOF
 
       - name: Set token from container
