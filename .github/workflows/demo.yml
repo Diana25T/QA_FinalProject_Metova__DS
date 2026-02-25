@@ -80,23 +80,23 @@ jobs:
 
       - name: Create test user and token
         run: |
-          docker compose exec -T web_recipes python manage.py shell << 'EOF' > token_output.txt
+          docker compose exec -T web_recipes python manage.py shell << 'EOF'
           from django.contrib.auth.models import User
           from rest_framework.authtoken.models import Token
-
+          
           # Создаем пользователя
           user, created = User.objects.get_or_create(
-          username='testuser',
-          defaults={'email': 'test@example.com' }
-         )
-         if created:
-          user.set_password('testpass123')
-          user.save()
-          print(" Тестовый пользователь создан")
-
-         # Создаем токен
-         token, _ = Token.objects.get_or_create(user=user)
-         print(" Токен создан (не показываем в логах)")
+              username='testuser',
+              defaults={'email': 'test@example.com'}
+          )
+          if created:
+              user.set_password('testpass123')
+              user.save()
+              print(" Тестовый пользователь создан")
+          
+          # Создаем токен
+          token, _ = Token.objects.get_or_create(user=user)
+          print(" Токен создан")
          EOF
 
       - name: Set token from container
