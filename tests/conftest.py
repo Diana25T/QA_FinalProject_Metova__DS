@@ -132,7 +132,6 @@ def pytest_runtest_makereport(item, call):
 # ======================== ФИКСТУРЫ API ========================
 
 @pytest.fixture(scope="session")
-@pytest.fixture(scope="session")
 def api_client():
     """Фикстура для API клиента с токеном из окружения"""
     token = os.getenv('TANDOOR_TOKEN')
