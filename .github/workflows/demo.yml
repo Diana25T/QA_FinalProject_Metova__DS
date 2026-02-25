@@ -48,8 +48,6 @@ jobs:
           ALLOWED_HOSTS=localhost,127.0.0.1,web_recipes
           CSRF_TRUSTED_ORIGINS=http://localhost
           DEBUG=1
-              # API Token
-          TANDOOR_TOKEN=${{ secrets.TANDOOR_TOKEN }}
           EOF
           echo " Created .env file"
 
@@ -78,6 +76,40 @@ jobs:
           docker compose ps
           echo "=== Web Container Logs ==="
           docker compose logs web_recipes --tail=50
+          
+
+      - name: Create test user and token
+        run: |
+          docker compose exec -T web_recipes python manage.py shell << 'EOF' > token_output.txt
+          from django.contrib.auth.models import User
+          from rest_framework.authtoken.models import Token
+
+          # Создаем пользователя
+          user, created = User.objects.get_or_create(
+          username='testuser',
+          defaults={'email': 'test@example.com' }
+         )
+         if created:
+          user.set_password('testpass123')
+          user.save()
+          print(" Тестовый пользователь создан")
+
+         # Создаем токен
+         token, _ = Token.objects.get_or_create(user=user)
+         print(" Токен создан (не показываем в логах)")
+         EOF
+
+      - name: Set token from container
+        run: |
+          # Извлекаем токен из вывода команды (без показа в логах)
+          TOKEN=$(docker compose exec -T web_recipes python manage.py shell -c "
+          from django.contrib.auth.models import User
+          from rest_framework.authtoken.models import Token
+          user = User.objects.get(username='testuser')
+          token = Token.objects.get(user=user)
+          print(token.key)
+         ")
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       - name: Wait for API to be ready
         run: |
@@ -113,7 +145,6 @@ jobs:
         env:
           APP_URL: http://localhost
           TEST_ENV: github-actions
-          TANDOOR_TOKEN: ${{ secrets.TANDOOR_TOKEN }}
 
       - name: Upload Allure results
         uses: actions/upload-artifact@v4
