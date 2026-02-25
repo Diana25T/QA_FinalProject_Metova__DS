@@ -104,8 +104,7 @@ jobs:
           from rest_framework.authtoken.models import Token
           user = User.objects.get(username='testuser')
           token = Token.objects.get(user=user)
-          print(token.key)
-         ")
+          print(token.key) ")
           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
 
       - name: Wait for API to be ready
