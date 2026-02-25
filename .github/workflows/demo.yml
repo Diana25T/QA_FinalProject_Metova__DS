@@ -55,7 +55,6 @@ jobs:
         run: |
           docker compose down -v
           docker compose up -d
-          
           echo " Waiting for application to be ready..."
           timeout=60
           counter=0
@@ -82,7 +81,6 @@ jobs:
           docker compose exec -T web_recipes python manage.py shell << 'EOF'
           from django.contrib.auth.models import User
           from rest_framework.authtoken.models import Token
-          
           # Создаем пользователя
           user, created = User.objects.get_or_create(
           username='testuser',
