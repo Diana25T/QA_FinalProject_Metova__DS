@@ -81,52 +81,39 @@ jobs:
           echo "=== Web Container Logs ==="
           docker compose logs web_recipes --tail=50
 
-      - name: Create test user and token
+      - name: Create test user and set token
         run: |
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
-          from django.contrib.auth.models import User
-          from rest_framework.authtoken.models import Token
-          from cookbook.models import UserPreference
-          # Удаляем старого пользователя если есть
-           User.objects.filter(username='testuser').delete()
+         TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+         from django.contrib.auth.models import User
+         from rest_framework.authtoken.models import Token
+         from cookbook.models import UserPreference
 
-          # Создаем АКТИВНОГО пользователя с правами
-          user = User.objects.create_user(
-          username='testuser',
-          password='testpass123',
-          email='test@example.com',
-          is_active=True  
-           )
+         # Удаляем старого пользователя если есть
+          User.objects.filter(username='testuser').delete()
 
-          # Создаем необходимые настройки пользователя
-          pref, created = UserPreference.objects.get_or_create(user=user)
+         # Создаем активного пользователя
+         user = User.objects.create_user(
+         username='testuser',
+         password='testpass123',
+         email='test@example.com',
+         is_active=True
+         )
 
-          # СОЗДАЕМ ТОКЕН
-          token, created = Token.objects.get_or_create(user=user)
+         # Создаем необходимые настройки пользователя
+         pref, created = UserPreference.objects.get_or_create(user=user)
 
-          print(f" Пользователь: {user.username}")
-          print(f" Токен: {token.key}")
-          EOF
-
-      - name: Set token from container
-        run: |
-          OUTPUT=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-          from django.contrib.auth.models import User
-          from rest_framework.authtoken.models import Token
-          user = User.objects.get(username='testuser')
-          token = Token.objects.get(user=user)
-          print(token.key) ")
-           TOKEN=$(echo "$OUTPUT" | grep -E '^[a-f0-9]{40}$' | tail -1)
-          
-          if [ -n "$TOKEN" ]; then
-            echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-            echo " Token successfully extracted"
-          else
+         # СОЗДАЕМ ТОКЕН
+         token, created = Token.objects.get_or_create(user=user)
+         print(token.key) 
+         EOF)
+    
+             if [ -n "$TOKEN" ]; then
+              echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+             echo " Token successfully extracted"
+           else
             echo " Failed to extract token"
-            echo "Raw output:"
-            echo "$OUTPUT"
-            exit 1
-          fi
+           exit 1
+         fi
           
       - name: Wait for API to be ready
         run: |
