@@ -101,7 +101,7 @@ jobs:
           export APP_URL=http://localhost
           mkdir -p allure-results
           
-              echo "🔍 Running API tests with marker 'api'..."
+              echo " Running API tests with marker 'api'..."
               echo "TANDOOR_TOKEN is set: $(if [ -n "$TANDOOR_TOKEN" ]; then echo "есть токен"; else echo "нет токена"; fi)"
           pytest tests/ \
             --alluredir=allure-results \
