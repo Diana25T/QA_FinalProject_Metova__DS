@@ -136,7 +136,7 @@ def api_client():
     """Фикстура для API клиента с токеном из окружения"""
     token = os.getenv('TANDOOR_TOKEN')
     assert token, "TANDOOR_TOKEN не найден!"
-    return TandoorAPIClient(token=token)
+    return TandoorAPIClient()
 
 
 @pytest.fixture(scope="session")
