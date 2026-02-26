@@ -102,21 +102,21 @@ jobs:
 
              # Права для рецептов
              recipe_perms = Permission.objects.filter(
-             content_type__app_label='cookbook',
-             codename__in=['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']
+                 content_type__app_label='cookbook',
+                 codename__in=['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']
              )
 
              # Права для планов питания
              meal_plan_perms = Permission.objects.filter(
-             content_type__app_label='cookbook',
-             codename__in=['add_mealplan', 'change_mealplan', 'delete_mealplan', 'view_mealplan']
+                 content_type__app_label='cookbook',
+                 codename__in=['add_mealplan', 'change_mealplan', 'delete_mealplan', 'view_mealplan']
             )
 
             # Права для списка покупок
             shopping_perms = Permission.objects.filter(
-            content_type__app_label='cookbook',
-            codename__in=['add_shoppinglistentry', 'change_shoppinglistentry', 
-                        'delete_shoppinglistentry', 'view_shoppinglistentry']
+                content_type__app_label='cookbook',
+                codename__in=['add_shoppinglistentry', 'change_shoppinglistentry', 
+                            'delete_shoppinglistentry', 'view_shoppinglistentry']
             )
 
             # Добавляем все права группе
@@ -140,7 +140,7 @@ jobs:
             EmailAddress.objects.create(
                 user=user,
                 email=user.email,
-               verified=True,
+                verified=True,
                 primary=True
             )
 
@@ -155,24 +155,24 @@ jobs:
             UserPreference.objects.get_or_create(user=user)
               
             print(" User created successfully")
-            EOF
+          EOF
 
-            # Теперь создаем токен через API (пользователь уже существует!)
-            TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
-              -H "Content-Type: application/json" \
-              -u testuser:testpass123 \
-              -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
-              | jq -r '.token')
+                # Теперь создаем токен через API (пользователь уже существует!)
+                TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
+                  -H "Content-Type: application/json" \
+                  -u testuser:testpass123 \
+                  -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
+                  | jq -r '.token')
           
-            echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-            echo "::add-mask::$TOKEN"
+                echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+                echo "::add-mask::$TOKEN"
           
-            if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-              echo " Token successfully extracted"
-            else
-              echo " Failed to extract token"
-              exit 1
-            fi
+                if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+                  echo " Token successfully extracted"
+                else
+                  echo " Failed to extract token"
+                  exit 1
+                fi
         
       - name: Test token manually
         run: |
