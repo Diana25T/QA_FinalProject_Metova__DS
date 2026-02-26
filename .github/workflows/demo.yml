@@ -168,7 +168,7 @@ jobs:
             from django.contrib.auth.models import Permission
             print('Доступные права:')
             for p in Permission.objects.all()[:20]:  # первые 20
-            print(f'  {p.codename} - {p.name}')
+                print(f'  {p.codename} - {p.name}')
             "
 
       - name: Check user in DB
