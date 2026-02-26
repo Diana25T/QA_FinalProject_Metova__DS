@@ -86,7 +86,7 @@ jobs:
       - name: Create test user and token
         run: |
           # Сначала создаем пользователя
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+              docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
           from django.contrib.auth.models import User, Group, Permission
           from django.contrib.contenttypes.models import ContentType
           from cookbook.models import UserPreference, Space, Recipe
@@ -149,22 +149,22 @@ jobs:
               print(" User created successfully")
           EOF
 
-                  # Теперь создаем токен через API (пользователь уже существует!)
-                  TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
-                    -H "Content-Type: application/json" \
-                    -u testuser:testpass123 \
-                    -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
-                    | jq -r '.token')
+              # Теперь создаем токен через API (пользователь уже существует!)
+              TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
+                -H "Content-Type: application/json" \
+                -u testuser:testpass123 \
+                -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
+                | jq -r '.token')
           
-                  echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-                  echo "::add-mask::$TOKEN"
+              echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+              echo "::add-mask::$TOKEN"
           
-                  if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-                    echo " Token successfully extracted"
-                  else
-                    echo " Failed to extract token"
-                    exit 1
-                  fi
+              if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+                echo " Token successfully extracted"
+              else
+                echo " Failed to extract token"
+                exit 1
+              fi
         
       - name: Test token manually
         run: |
