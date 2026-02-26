@@ -100,79 +100,79 @@ jobs:
               # Создаем группу с правами
               group, _ = Group.objects.get_or_create(name='Default')
 
-             # Права для рецептов
-             recipe_perms = Permission.objects.filter(
-                 content_type__app_label='cookbook',
-                 codename__in=['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']
-             )
+              # Права для рецептов
+              recipe_perms = Permission.objects.filter(
+                  content_type__app_label='cookbook',
+                  codename__in=['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']
+              )
 
-             # Права для планов питания
-             meal_plan_perms = Permission.objects.filter(
-                 content_type__app_label='cookbook',
-                 codename__in=['add_mealplan', 'change_mealplan', 'delete_mealplan', 'view_mealplan']
-            )
+              # Права для планов питания
+              meal_plan_perms = Permission.objects.filter(
+                  content_type__app_label='cookbook',
+                  codename__in=['add_mealplan', 'change_mealplan', 'delete_mealplan', 'view_mealplan']
+              )
 
-            # Права для списка покупок
-            shopping_perms = Permission.objects.filter(
-                content_type__app_label='cookbook',
-                codename__in=['add_shoppinglistentry', 'change_shoppinglistentry', 
-                            'delete_shoppinglistentry', 'view_shoppinglistentry']
-            )
+              # Права для списка покупок
+              shopping_perms = Permission.objects.filter(
+                  content_type__app_label='cookbook',
+                  codename__in=['add_shoppinglistentry', 'change_shoppinglistentry', 
+                              'delete_shoppinglistentry', 'view_shoppinglistentry']
+              )
 
-            # Добавляем все права группе
-            group.permissions.add(*recipe_perms, *meal_plan_perms, *shopping_perms)
+              # Добавляем все права группе
+              group.permissions.add(*recipe_perms, *meal_plan_perms, *shopping_perms)
 
-            # Удаляем старого пользователя если есть
-            User.objects.filter(username='testuser').delete()
+              # Удаляем старого пользователя если есть
+              User.objects.filter(username='testuser').delete()
 
-            # Создаем активного пользователя
-            user = User.objects.create_user(
-                username='testuser',
-                password='testpass123',
-                email='test@example.com',
-                is_active=True
-            )
+              # Создаем активного пользователя
+              user = User.objects.create_user(
+                  username='testuser',
+                  password='testpass123',
+                  email='test@example.com',
+                  is_active=True
+              )
 
-            # Добавляем пользователя в группу
-            user.groups.add(group)
+              # Добавляем пользователя в группу
+              user.groups.add(group)
 
-            # Подтверждаем email
-            EmailAddress.objects.create(
-                user=user,
-                email=user.email,
-                verified=True,
-                primary=True
-            )
+              # Подтверждаем email
+              EmailAddress.objects.create(
+                  user=user,
+                  email=user.email,
+                  verified=True,
+                  primary=True
+              )
 
-            # Добавляем пользователя в пространство
-            user.space_set.add(space)
+              # Добавляем пользователя в пространство
+              user.space_set.add(space)
 
-            # Делаем пользователя владельцем пространства
-            space.created_by = user
-            space.save()
+              # Делаем пользователя владельцем пространства
+              space.created_by = user
+              space.save()
               
-            # Создаем настройки пользователя
-            UserPreference.objects.get_or_create(user=user)
+              # Создаем настройки пользователя
+              UserPreference.objects.get_or_create(user=user)
               
-            print(" User created successfully")
+              print(" User created successfully")
           EOF
 
-                # Теперь создаем токен через API (пользователь уже существует!)
-                TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
-                  -H "Content-Type: application/json" \
-                  -u testuser:testpass123 \
-                  -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
-                  | jq -r '.token')
+                  # Теперь создаем токен через API (пользователь уже существует!)
+                  TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
+                    -H "Content-Type: application/json" \
+                    -u testuser:testpass123 \
+                    -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
+                    | jq -r '.token')
           
-                echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-                echo "::add-mask::$TOKEN"
+                  echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+                  echo "::add-mask::$TOKEN"
           
-                if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-                  echo " Token successfully extracted"
-                else
-                  echo " Failed to extract token"
-                  exit 1
-                fi
+                  if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+                    echo " Token successfully extracted"
+                  else
+                    echo " Failed to extract token"
+                    exit 1
+                  fi
         
       - name: Test token manually
         run: |
