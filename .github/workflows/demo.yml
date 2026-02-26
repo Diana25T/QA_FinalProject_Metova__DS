@@ -48,7 +48,7 @@ jobs:
           ALLOWED_HOSTS=localhost,127.0.0.1,web_recipes
           CSRF_TRUSTED_ORIGINS=http://localhost
           DEBUG=1
-          SOCIAL_DEFAULT_ACCESS=read write
+          SOCIAL_DEFAULT_ACCESS=1
           SOCIAL_DEFAULT_GROUP=Default
           EOF
           echo " Created .env file"
@@ -115,7 +115,10 @@ jobs:
                  email='test@example.com',
                  is_active=True
              )
-             
+
+             # Добавляем ВСЕ права группе
+             group.permissions.add(*permissions)
+
              # Добавляем пользователя в группу
              user.groups.add(group)
 
