@@ -89,7 +89,7 @@ jobs:
          from cookbook.models import UserPreference
 
          # Удаляем старого пользователя если есть
-          User.objects.filter(username='testuser').delete()
+         User.objects.filter(username='testuser').delete()
 
          # Создаем активного пользователя
          user = User.objects.create_user(
