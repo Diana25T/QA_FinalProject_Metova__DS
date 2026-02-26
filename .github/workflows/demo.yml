@@ -123,6 +123,12 @@ jobs:
              
              # СОЗДАЕМ ТОКЕН
              token, created = Token.objects.get_or_create(user=user)
+             # Устанавливаем ПРАВА (scopes) для токена!
+             # 'read write' - полный доступ
+             TokenMeta.objects.get_or_create(
+             token=token,
+             defaults={'scopes': 'read write'} 
+             )
              print(token.key) 
          EOF
          )
