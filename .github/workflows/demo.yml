@@ -105,6 +105,14 @@ jobs:
                  is_active=True
              )
 
+             # Подтверждаем email 
+             EmailAddress.objects.create(
+             user=user,
+             email=user.email,
+             verified=True,
+             primary=True
+             )
+
               # Добавляем пользователя в пространство
              user.space_set.add(space)
              
