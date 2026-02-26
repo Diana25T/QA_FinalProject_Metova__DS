@@ -154,12 +154,16 @@ jobs:
                   print(f"  - {name}")
           EOF
           
-      - name: Manual API test
+      - name: Manual API test - different format
         run: |
-          echo "=== Проверка API вручную ==="
-          curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+          echo "=== Проверка с форматом 'Token' ==="
+          curl -v -H "Authorization: Token $TANDOOR_TOKEN" \
             http://localhost/api/recipe/ || true
-          echo "=== Конец проверки ==="
+          
+          echo "=== Проверка с куки ==="
+          curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            -H "X-CSRFToken: test" \
+            http://localhost/api/recipe/ || true
       
       - name: Wait for API to be ready
         run: |
