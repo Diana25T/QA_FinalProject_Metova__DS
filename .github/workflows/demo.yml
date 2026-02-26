@@ -109,7 +109,7 @@ jobs:
              # СОЗДАЕМ ТОКЕН
              token, created = Token.objects.get_or_create(user=user)
              print(token.key) 
-             EOF
+         EOF
              )
 
              # Устанавливаем токен в переменные окружения
