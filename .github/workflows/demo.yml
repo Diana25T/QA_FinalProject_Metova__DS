@@ -126,8 +126,12 @@ jobs:
                  user=user
              )
              
-             # СОЗДАЕМ ТОКЕН
-             token, created = Token.objects.get_or_create(user=user)
+             # СОЗДАЕМ ТОКЕН С ПРАВАМИ (НОВЫЕ СТРОКИ)
+             token, _ = Token.objects.get_or_create(user=user)
+             TokenMeta.objects.get_or_create(
+             token=token,
+             defaults={'scopes': 'read write'}
+             )
              print(token.key) 
          EOF
          )
