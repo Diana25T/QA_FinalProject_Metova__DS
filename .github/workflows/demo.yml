@@ -83,7 +83,8 @@ jobs:
 
       - name: Create test user and set token
         run: |
-         TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+         TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 
+         'EOF' 2>/dev/null | grep -E '^[a-f0-9]{40}$' | head -1
          from django.contrib.auth.models import User
          from rest_framework.authtoken.models import Token
          from cookbook.models import UserPreference
