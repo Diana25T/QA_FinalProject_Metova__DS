@@ -112,7 +112,7 @@ jobs:
              pref, created = UserPreference.objects.get_or_create(
                  user=user,
                  space=space
-         )
+             )
              # СОЗДАЕМ ТОКЕН
              token, created = Token.objects.get_or_create(user=user)
              print(token.key) 
