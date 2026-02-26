@@ -83,90 +83,80 @@ jobs:
           echo "=== Web Container Logs ==="
           docker compose logs web_recipes --tail=50
 
-      - name: Create test user and set token
+      - name: Create test user and token
         run: |
-         TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF' | grep -E '^[a-f0-9]{40}$' | head -1
-         from django.contrib.auth.models import User, Group, Permission
-         from django.contrib.contenttypes.models import ContentType
-         from cookbook.models import UserPreference, Space
-         from allauth.account.models import EmailAddress
-         from django_scopes import scopes_disabled  # импортируйте утилиту отключения областей видимости
+          # Сначала создаем пользователя
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+          from django.contrib.auth.models import User, Group, Permission
+          from django.contrib.contenttypes.models import ContentType
+          from cookbook.models import UserPreference, Space
+          from allauth.account.models import EmailAddress
+          from django_scopes import scopes_disabled
 
-         # Используем менеджер контекста для временного отключения областей видимости
-         with scopes_disabled():
-             # Получаем или создаем пространство
+          with scopes_disabled():
+              # Получаем или создаем пространство
               space, _ = Space.objects.get_or_create(name='Default Space')
+              
+              # Создаем группу с правами
+              group, _ = Group.objects.get_or_create(name='Default')
+              
+              # Добавляем все права из cookbook
+              content_types = ContentType.objects.filter(app_label='cookbook')
+              permissions = Permission.objects.filter(content_type__in=content_types)
+              group.permissions.add(*permissions)
 
-             # Создаем группу с правами
-             group, _ = Group.objects.get_or_create(name='Default')
+              # Удаляем старого пользователя если есть
+              User.objects.filter(username='testuser').delete()
 
-             # Добавляем все права из cookbook
-             content_types = ContentType.objects.filter(app_label='cookbook')
-             permissions = Permission.objects.filter(content_type__in=content_types)
-             group.permissions.add(*permissions)
+              # Создаем активного пользователя
+              user = User.objects.create_user(
+                  username='testuser',
+                  password='testpass123',
+                  email='test@example.com',
+                  is_active=True
+              )
 
-             # Удаляем старого пользователя если есть
-             User.objects.filter(username='testuser').delete()
+              # Добавляем пользователя в группу
+              user.groups.add(group)
 
-             # Создаем активного пользователя
-             user = User.objects.create_user(
-                 username='testuser',
-                 password='testpass123',
-                 email='test@example.com',
-                 is_active=True
-             )
-
-             # Добавляем ВСЕ права группе
-             group.permissions.add(*permissions)
-
-             # Добавляем пользователя в группу
-             user.groups.add(group)
-
-             # Подтверждаем email 
-             EmailAddress.objects.create(
-             user=user,
-             email=user.email,
-             verified=True,
-             primary=True
-             )
+              # Подтверждаем email
+              EmailAddress.objects.create(
+                  user=user,
+                  email=user.email,
+                  verified=True,
+                  primary=True
+              )
 
               # Добавляем пользователя в пространство
-             user.space_set.add(space)
+              user.space_set.add(space)
 
-             # Делаем пользователя владельцем пространства
-             space.created_by = user
-             space.save()
-             
-             # Создаем необходимые настройки пользователя
-             pref, created = UserPreference.objects.get_or_create(
-                 user=user
-             )
-         EOF
-         )
+              # Делаем пользователя владельцем пространства
+              space.created_by = user
+              space.save()
+              
+              # Создаем настройки пользователя
+              UserPreference.objects.get_or_create(user=user)
+              
+              print(" User created successfully")
+          EOF
 
-      - name: Create API token
-        run: |
-          # Создаем токен через API
+          # Теперь создаем токен через API (пользователь уже существует!)
           TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
             -H "Content-Type: application/json" \
             -u testuser:testpass123 \
             -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
-            | jq -r '.token')    
-
-              # Устанавливаем токен в переменные окружения
-              echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-
-              # Маска вывода токена
-              echo "::add-mask::$TOKEN"
-
-              if [ -n "$TOKEN" ]; then
-                echo " Token successfully extracted"
-              else
-                echo " Failed to extract token"
-                exit 1
-              fi
-
-      # Добавьте этот шаг перед тестами
+            | jq -r '.token')
+          
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$TOKEN"
+          
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            echo " Token successfully extracted"
+          else
+            echo " Failed to extract token"
+            exit 1
+          fi
+        
       - name: Test token manually
         run: |
             curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
