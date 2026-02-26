@@ -164,12 +164,12 @@ jobs:
             
            # Создаем токен через Python ВНУТРИ КОНТЕЙНЕРА на порт 80
            TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
-           import requests
-           import json
-           response = requests.post(
-               'http://localhost:80/api/access-token/',
-               auth=('testuser', 'testpass123'),
-               json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
+          import requests
+          import json
+          response = requests.post(
+              'http://localhost:80/api/access-token/',
+              auth=('testuser', 'testpass123'),
+              json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
           )
           if response.status_code == 200:
               token = response.json().get('token', '')
