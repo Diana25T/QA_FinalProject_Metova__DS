@@ -174,15 +174,15 @@ jobs:
                   json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'},
                   timeout=5
               )
-              if response.status_code == 200:
-                  print(response.json().get('token', ''))
-                  break
-          except:
-              if i == 9:
-                 print('')
-              time.sleep(2)
+                  if response.status_code == 200:
+                      print(response.json().get('token', ''))
+                      break
+              except Exception as e:
+            print(f'Attempt {i+1} failed, retrying...')
+          time.sleep(4)
+          print(token)
           ")
-        
+       
       - name: Test token manually
         run: |
             curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
