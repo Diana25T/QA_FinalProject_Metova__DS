@@ -87,6 +87,10 @@ jobs:
          from django.contrib.auth.models import User
          from rest_framework.authtoken.models import Token
          from cookbook.models import UserPreference
+         from django_scopes import scopes_disabled  # импортируйте утилиту отключения областей видимости
+
+         # Используем менеджер контекста для временного отключения областей видимости
+         with scopes_disabled()
 
          # Удаляем старого пользователя если есть
          User.objects.filter(username='testuser').delete()
