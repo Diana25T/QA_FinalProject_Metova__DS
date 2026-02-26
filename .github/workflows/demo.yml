@@ -165,6 +165,22 @@ jobs:
                 echo " Failed to extract token"
                 exit 1
               fi
+
+      # Добавьте этот шаг перед тестами
+      - name: Test token manually
+        run: |
+            curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/recipe/
+
+      - name: Check user in DB
+        run: |
+            docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
+            from django.contrib.auth.models import User
+            user = User.objects.get(username='testuser')
+            print(f'User exists: {user.username}')
+            print(f'Active: {user.is_active}')
+            print(f'Groups: {[g.name for g in user.groups.all()]}')
+            "    
      
       - name: Wait for API to be ready
         run: |
