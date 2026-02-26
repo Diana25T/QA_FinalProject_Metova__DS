@@ -189,7 +189,24 @@ jobs:
           for perm in user.get_all_permissions():
               print(f'  - {perm}')
           "
-            
+
+      - name: Check user space
+        run: |
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
+          from django.contrib.auth.models import User
+          from cookbook.models import Space
+          from django_scopes import scopes_disabled
+
+          with scopes_disabled():
+              user = User.objects.get(username='testuser')
+              spaces = user.space_set.all()
+              print(f'User spaces: {[s.name for s in spaces]}')
+          if spaces:
+              space = spaces[0]
+              print(f'Active space: {space.name}')
+              print(f'Space owner: {space.created_by.username if space.created_by else None}')
+          "
+
       - name: Check user in DB
         run: |
             docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
