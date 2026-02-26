@@ -84,8 +84,8 @@ jobs:
       - name: Create test user and set token
         run: |
          TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF' | grep -E '^[a-f0-9]{40}$' | head -1
-         from django.contrib.auth.models import User
-         from rest_framework.authtoken.models import Token
+         from django.contrib.auth.models import User, Group, Permission
+         from django.contrib.contenttypes.models import ContentType
          from cookbook.models import UserPreference, Space
          from allauth.account.models import EmailAddress
          from django_scopes import scopes_disabled  # импортируйте утилиту отключения областей видимости
@@ -93,7 +93,15 @@ jobs:
          # Используем менеджер контекста для временного отключения областей видимости
          with scopes_disabled():
              # Получаем или создаем пространство
-             space, _ = Space.objects.get_or_create(name='Default Space')
+              space, _ = Space.objects.get_or_create(name='Default Space')
+
+             # Создаем группу с правами
+             group, _ = Group.objects.get_or_create(name='Default')
+
+             # Добавляем все права из cookbook
+             content_types = ContentType.objects.filter(app_label='cookbook')
+             permissions = Permission.objects.filter(content_type__in=content_types)
+             group.permissions.add(*permissions)
 
              # Удаляем старого пользователя если есть
              User.objects.filter(username='testuser').delete()
@@ -105,6 +113,9 @@ jobs:
                  email='test@example.com',
                  is_active=True
              )
+             
+             # Добавляем пользователя в группу
+             user.groups.add(group)
 
              # Подтверждаем email 
              EmailAddress.objects.create(
