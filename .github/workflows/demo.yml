@@ -153,6 +153,13 @@ jobs:
               if 'Token' in name or 'token' in name:
                   print(f"  - {name}")
           EOF
+          
+      - name: Manual API test
+        run: |
+          echo "=== Проверка API вручную ==="
+          curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/recipe/ || true
+          echo "=== Конец проверки ==="
       
       - name: Wait for API to be ready
         run: |
