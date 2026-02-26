@@ -92,38 +92,38 @@ jobs:
          # Используем менеджер контекста для временного отключения областей видимости
          with scopes_disabled():
 
-         # Удаляем старого пользователя если есть
-         User.objects.filter(username='testuser').delete()
+             # Удаляем старого пользователя если есть
+             User.objects.filter(username='testuser').delete()
 
-         # Создаем активного пользователя
-         user = User.objects.create_user(
-             username='testuser',
-             password='testpass123',
-             email='test@example.com',
-             is_active=True
-         )
+             # Создаем активного пользователя
+             user = User.objects.create_user(
+                 username='testuser',
+                 password='testpass123',
+                 email='test@example.com',
+                 is_active=True
+             )
 
-         # Создаем необходимые настройки пользователя
-         pref, created = UserPreference.objects.get_or_create(user=user)
+             # Создаем необходимые настройки пользователя
+             pref, created = UserPreference.objects.get_or_create(user=user)
 
-         # СОЗДАЕМ ТОКЕН
-         token, created = Token.objects.get_or_create(user=user)
-         print(token.key) 
-         EOF
-         )
+             # СОЗДАЕМ ТОКЕН
+             token, created = Token.objects.get_or_create(user=user)
+             print(token.key) 
+             EOF
+             )
 
-         # Устанавливаем токен в переменные окружения
-         echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+             # Устанавливаем токен в переменные окружения
+             echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
 
-         # Маска вывода токена
-         echo "::add-mask::$TOKEN"
+             # Маска вывода токена
+             echo "::add-mask::$TOKEN"
 
-         if [ -n "$TOKEN" ]; then
-           echo " Token successfully extracted"
-         else
-           echo " Failed to extract token"
-           exit 1
-         fi
+             if [ -n "$TOKEN" ]; then
+               echo " Token successfully extracted"
+             else
+               echo " Failed to extract token"
+               exit 1
+             fi
           
       - name: Wait for API to be ready
         run: |
