@@ -97,7 +97,7 @@ jobs:
              password='testpass123',
              email='test@example.com',
              is_active=True
-             )
+         )
 
          # Создаем необходимые настройки пользователя
          pref, created = UserPreference.objects.get_or_create(user=user)
