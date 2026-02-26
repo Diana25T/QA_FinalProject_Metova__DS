@@ -128,10 +128,6 @@ jobs:
              
              # СОЗДАЕМ ТОКЕН С ПРАВАМИ (НОВЫЕ СТРОКИ)
              token, _ = Token.objects.get_or_create(user=user)
-             TokenMeta.objects.get_or_create(
-             token=token,
-             defaults={'scopes': 'read write'}
-             )
              print(token.key) 
          EOF
          )
@@ -148,7 +144,16 @@ jobs:
                 echo " Failed to extract token"
                 exit 1
               fi
-          
+      - name: Debug available models
+        run: |
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+          from cookbook.models import *
+          print("Доступные модели:")
+          for name in dir():
+              if 'Token' in name or 'token' in name:
+                  print(f"  - {name}")
+          EOF
+      
       - name: Wait for API to be ready
         run: |
           echo " Waiting for API endpoint..."
