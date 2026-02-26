@@ -106,7 +106,7 @@ jobs:
              )
 
               # Добавляем пользователя в пространство
-             user.spaces.add(space)
+             user.space_set.add(space)
              
              # Создаем необходимые настройки пользователя
              pref, created = UserPreference.objects.get_or_create(
