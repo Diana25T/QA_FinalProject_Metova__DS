@@ -86,7 +86,7 @@ jobs:
          TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF' | grep -E '^[a-f0-9]{40}$' | head -1
          from django.contrib.auth.models import User
          from rest_framework.authtoken.models import Token
-         from cookbook.models import UserPreference, Space
+         from cookbook.models import UserPreference, Space, TokenMeta
          from django_scopes import scopes_disabled  # импортируйте утилиту отключения областей видимости
 
          # Используем менеджер контекста для временного отключения областей видимости
