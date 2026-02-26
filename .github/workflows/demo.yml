@@ -110,8 +110,7 @@ jobs:
              
              # Создаем необходимые настройки пользователя
              pref, created = UserPreference.objects.get_or_create(
-                 user=user,
-                 space=space
+                 user=user
              )
              
              # СОЗДАЕМ ТОКЕН
