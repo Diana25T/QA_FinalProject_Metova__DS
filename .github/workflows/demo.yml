@@ -151,8 +151,8 @@ jobs:
 
               # Теперь создаем токен через Python (вместо curl)
               TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
-              import requests
-              import json
+          import requests
+          import json
               response = requests.post(
                   'http://127.0.0.1:8000/api/access-token/',
                   auth=('testuser', 'testpass123'),
