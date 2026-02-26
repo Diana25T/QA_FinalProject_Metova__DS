@@ -149,14 +149,17 @@ jobs:
               print(" User created successfully")
           EOF
 
-              # Теперь создаем токен через API (пользователь уже существует!)
-              TOKEN=$(docker compose exec -T web_recipes sh -c '
-                curl -s -X POST http://127.0.0.1:8000/api/access-token/ \
-                  -H "Content-Type: application/json" \
-                  -u testuser:testpass123 \
-                  -d "{\"expires\": \"2026-12-31T23:59:59Z\", \"scope\": \"read write\"}" \
-                  | jq -r ".token"
-              ')
+              # Теперь создаем токен через Python (вместо curl)
+              TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
+              import requests
+              import json
+              response = requests.post(
+                  'http://127.0.0.1:8000/api/access-token/',
+                  auth=('testuser', 'testpass123'),
+                  json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
+              )
+              print(response.json().get('token', ''))
+              ")
           
               echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
               echo "::add-mask::$TOKEN"
