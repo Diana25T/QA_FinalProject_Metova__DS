@@ -69,11 +69,11 @@ jobs:
             sleep 2
             counter=$((counter + 1))
           done
+
       - name: Run database migrations  
         run: |
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
           echo " Database migrations completed"
-
 
       - name: Show container logs
         if: always()
@@ -86,7 +86,7 @@ jobs:
       - name: Create test user and token
         run: |
           # Сначала создаем пользователя
-              docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
           from django.contrib.auth.models import User, Group, Permission
           from django.contrib.contenttypes.models import ContentType
           from cookbook.models import UserPreference, Space, Recipe
@@ -94,108 +94,108 @@ jobs:
           from django_scopes import scopes_disabled
 
           with scopes_disabled():
-              # Получаем или создаем пространство
-              space, _ = Space.objects.get_or_create(name='Default Space')
-              
-              # Создаем группу с правами
-              group, _ = Group.objects.get_or_create(name='Default')
+          # Получаем или создаем пространство
+          space, _ = Space.objects.get_or_create(name='Default Space')
 
-              # Права для рецептов
-              recipe_ct = ContentType.objects.get_for_model(Recipe)
-              recipe_perms = []
-              for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
-                  perm, created = Permission.objects.get_or_create(
-                      codename=codename,
-                      content_type=recipe_ct,
-                      defaults={'name': f'Can {codename.replace("_", " ")}'}
-                  )
-                  recipe_perms.append(perm)
+          # Создаем группу с правами
+          group, _ = Group.objects.get_or_create(name='Default')
 
-              # Добавляем все права группе
-              group.permissions.add(*recipe_perms)
-
-              # Удаляем старого пользователя если есть
-              User.objects.filter(username='testuser').delete()
-
-              # Создаем активного пользователя
-              user = User.objects.create_user(
-                  username='testuser',
-                  password='testpass123',
-                  email='test@example.com',
-                  is_active=True
+          # Права для рецептов
+          recipe_ct = ContentType.objects.get_for_model(Recipe)
+          recipe_perms = []
+          for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
+              perm, created = Permission.objects.get_or_create(
+                  codename=codename,
+                  content_type=recipe_ct,
+                  defaults={'name': f'Can {codename.replace("_", " ")}'}
               )
+              recipe_perms.append(perm)
 
-              # Добавляем пользователя в группу
-              user.groups.add(group)
+          # Добавляем все права группе
+          group.permissions.add(*recipe_perms)
 
-              # Подтверждаем email
-              EmailAddress.objects.create(
-                  user=user,
-                  email=user.email,
-                  verified=True,
-                  primary=True
-              )
+          # Удаляем старого пользователя если есть
+          User.objects.filter(username='testuser').delete()
 
-              # Добавляем пользователя в пространство
-              user.space_set.add(space)
+          # Создаем активного пользователя
+          user = User.objects.create_user(
+              username='testuser',
+              password='testpass123',
+              email='test@example.com',
+              is_active=True
+          )
 
-              # Делаем пользователя владельцем пространства
-              space.created_by = user
-              space.save()
-              
-              # Создаем настройки пользователя
-              UserPreference.objects.get_or_create(user=user)
-              
-              print(" User created successfully")
+          # Добавляем пользователя в группу
+          user.groups.add(group)
+
+          # Подтверждаем email
+          EmailAddress.objects.create(
+              user=user,
+              email=user.email,
+              verified=True,
+              primary=True
+          )
+
+          # Добавляем пользователя в пространство
+          user.space_set.add(space)
+
+          # Делаем пользователя владельцем пространства
+          space.created_by = user
+          space.save()
+          # Создаем настройки пользователя
+          UserPreference.objects.get_or_create(user=user)
+          
+          print(" User created successfully")
           EOF
-
-               echo "Waiting for API to be ready..."
+       
+          # Ждем готовности API
+          echo "Waiting for API to be ready..."
           timeout=30
           counter=0
           while [ $counter -lt $timeout ]; do
-            if docker compose exec -T web_recipes curl -s http://127.0.0.1:8000/api/ > /dev/null 2>&1; then
+            if curl -s http://localhost/api/ > /dev/null 2>&1; then
               echo "API is ready!"
               break
             fi
             echo "Waiting... ($counter/$timeout)"
             sleep 2
             counter=$((counter + 2))
-          done
-
-          # Создаем токен
-          TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
-          import requests
-          import time
-          for i in range(10):
-              try:
-                  response = requests.post(
-                  'http://127.0.0.1:8000/api/access-token/',
-                  auth=('testuser', 'testpass123'),
-                  json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'},
-                  timeout=5
-              )
-                  if response.status_code == 200:
-                      print(response.json().get('token', ''))
-                      break
-              except Exception as e:
-                  print(f'Attempt {i+1} failed, retrying...')
-                  time.sleep(4)
-                  print(token)
-              ")
-       
+            done 
+             
+          # Устанавливаем jq в контейнер
+          docker compose exec -T web_recipes apt-get update && apt-get install -y jq
+          
+          # Создаем токен через API
+          TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
+           -H "Content-Type: application/json" \
+            -u testuser:testpass123 \
+            -d "{\"expires\": \"2026-12-31T23:59:59Z\", \"scope\": \"read write\"}" \
+            | jq -r '.token')
+          
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$TOKEN"
+          
+          if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+            echo " Token successfully extracted"
+          else
+            echo " Failed to extract token"
+            exit 1
+          fi
+      
       - name: Test token manually
         run: |
-            curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+          curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
             http://localhost/api/recipe/
 
       - name: Check ALL permissions
         run: |
-            docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-            from django.contrib.auth.models import Permission
-            print('Все доступные права (первые 50):')
-            for i, p in enumerate(Permission.objects.all()[:50]):
-                print(f'{i+1:2d}. {p.content_type.app_label}.{p.codename} - {p.name}')
-            "
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
+          from django.contrib.auth.models import Permission
+          print('Все доступные права (первые 50):')
+          for i, p in enumerate(Permission.objects.all()[:50]):
+              print(f'{i+1:2d}. {p.content_type.app_label}.{p.codename} - {p.name}')
+          "
+
       - name: Check user permissions
         run: |
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
@@ -226,13 +226,13 @@ jobs:
 
       - name: Check user in DB
         run: |
-            docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-            from django.contrib.auth.models import User
-            user = User.objects.get(username='testuser')
-            print(f'User exists: {user.username}')
-            print(f'Active: {user.is_active}')
-            print(f'Groups: {[g.name for g in user.groups.all()]}')
-            "    
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
+          from django.contrib.auth.models import User
+          user = User.objects.get(username='testuser')
+          print(f'User exists: {user.username}')
+          print(f'Active: {user.is_active}')
+          print(f'Groups: {[g.name for g in user.groups.all()]}')
+          "    
      
       - name: Wait for API to be ready
         run: |
@@ -256,8 +256,8 @@ jobs:
           export APP_URL=http://localhost
           mkdir -p allure-results
           
-              echo " Running API tests with marker 'api'..."
-              echo "TANDOOR_TOKEN is set: $(if [ -n "$TANDOOR_TOKEN" ]; then echo "есть токен"; else echo "нет токена"; fi)"
+          echo " Running API tests with marker 'api'..."
+          echo "TANDOOR_TOKEN is set: $(if [ -n "$TANDOOR_TOKEN" ]; then echo "есть токен"; else echo "нет токена"; fi)"
           pytest tests/ \
             --alluredir=allure-results \
             -m "api" \
