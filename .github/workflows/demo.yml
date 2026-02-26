@@ -125,12 +125,17 @@ jobs:
              pref, created = UserPreference.objects.get_or_create(
                  user=user
              )
-             
-             # СОЗДАЕМ ТОКЕН С ПРАВАМИ (НОВЫЕ СТРОКИ)
-             token, _ = Token.objects.get_or_create(user=user)
-             print(token.key) 
          EOF
          )
+
+      - name: Create API token
+        run: |
+          # Создаем токен через API
+          TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
+            -H "Content-Type: application/json" \
+            -u testuser:testpass123 \
+            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
+            | jq -r '.token')    
 
               # Устанавливаем токен в переменные окружения
               echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
@@ -144,27 +149,7 @@ jobs:
                 echo " Failed to extract token"
                 exit 1
               fi
-      - name: Debug available models
-        run: |
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
-          from cookbook.models import *
-          print("Доступные модели:")
-          for name in dir():
-              if 'Token' in name or 'token' in name:
-                  print(f"  - {name}")
-          EOF
-          
-      - name: Manual API test - different format
-        run: |
-          echo "=== Проверка с форматом 'Token' ==="
-          curl -v -H "Authorization: Token $TANDOOR_TOKEN" \
-            http://localhost/api/recipe/ || true
-          
-          echo "=== Проверка с куки ==="
-          curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            -H "X-CSRFToken: test" \
-            http://localhost/api/recipe/ || true
-      
+     
       - name: Wait for API to be ready
         run: |
           echo " Waiting for API endpoint..."
