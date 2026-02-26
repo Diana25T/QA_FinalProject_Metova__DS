@@ -149,31 +149,39 @@ jobs:
               print(" User created successfully")
           EOF
 
-              # Теперь создаем токен через Python (вместо curl)
-              TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
+               echo "Waiting for API to be ready..."
+          timeout=30
+          counter=0
+          while [ $counter -lt $timeout ]; do
+            if docker compose exec -T web_recipes curl -s http://127.0.0.1:8000/api/ > /dev/null 2>&1; then
+              echo "API is ready!"
+              break
+            fi
+            echo "Waiting... ($counter/$timeout)"
+            sleep 2
+            counter=$((counter + 2))
+          done
+
+          # Создаем токен
+          TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
           import requests
-          import json
-          response = requests.post(
-              'http://127.0.0.1:8000/api/access-token/',
-              auth=('testuser', 'testpass123'),
-              json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
-          )
-          if response.status_code == 200:
-              token = response.json().get('token', '')
-              print(token)
-          else:
-              print('')
+          import time
+          for i in range(10):
+              try:
+                  response = requests.post(
+                  'http://127.0.0.1:8000/api/access-token/',
+                  auth=('testuser', 'testpass123'),
+                  json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'},
+                  timeout=5
+              )
+              if response.status_code == 200:
+                  print(response.json().get('token', ''))
+                  break
+          except:
+              if i == 9:
+                 print('')
+              time.sleep(2)
           ")
-       
-                  echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-                  echo "::add-mask::$TOKEN"
-          
-                  if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-                    echo " Token successfully extracted"
-                  else
-                    echo " Failed to extract token"
-                    exit 1
-                  fi
         
       - name: Test token manually
         run: |
