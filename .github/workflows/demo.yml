@@ -153,23 +153,23 @@ jobs:
               TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
           import requests
           import json
-              response = requests.post(
-                  'http://127.0.0.1:8000/api/access-token/',
-                  auth=('testuser', 'testpass123'),
-                  json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
-              )
-              print(response.json().get('token', ''))
-              ")
+                  response = requests.post(
+                      'http://127.0.0.1:8000/api/access-token/',
+                      auth=('testuser', 'testpass123'),
+                      json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
+                  )
+                  print(response.json().get('token', ''))
+                  ")
           
-              echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-              echo "::add-mask::$TOKEN"
+                  echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+                  echo "::add-mask::$TOKEN"
           
-              if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
-                echo " Token successfully extracted"
-              else
-                echo " Failed to extract token"
-                exit 1
-              fi
+                  if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ]; then
+                    echo " Token successfully extracted"
+                  else
+                    echo " Failed to extract token"
+                    exit 1
+                  fi
         
       - name: Test token manually
         run: |
