@@ -112,18 +112,18 @@ jobs:
          EOF
              )
 
-             # Устанавливаем токен в переменные окружения
-             echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+              # Устанавливаем токен в переменные окружения
+              echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
 
-             # Маска вывода токена
-             echo "::add-mask::$TOKEN"
+              # Маска вывода токена
+              echo "::add-mask::$TOKEN"
 
-             if [ -n "$TOKEN" ]; then
-               echo " Token successfully extracted"
-             else
-               echo " Failed to extract token"
-               exit 1
-             fi
+              if [ -n "$TOKEN" ]; then
+                echo " Token successfully extracted"
+              else
+                echo " Failed to extract token"
+                exit 1
+              fi
           
       - name: Wait for API to be ready
         run: |
