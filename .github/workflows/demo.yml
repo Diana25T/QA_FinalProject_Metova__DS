@@ -94,60 +94,60 @@ jobs:
           from django_scopes import scopes_disabled
 
           with scopes_disabled():
-          # Получаем или создаем пространство
-          space, _ = Space.objects.get_or_create(name='Default Space')
+              # Получаем или создаем пространство
+              space, _ = Space.objects.get_or_create(name='Default Space')
 
-          # Создаем группу с правами
-          group, _ = Group.objects.get_or_create(name='Default')
+              # Создаем группу с правами
+              group, _ = Group.objects.get_or_create(name='Default')
 
-          # Права для рецептов
-          recipe_ct = ContentType.objects.get_for_model(Recipe)
-          recipe_perms = []
-          for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
-              perm, created = Permission.objects.get_or_create(
-                  codename=codename,
-                  content_type=recipe_ct,
-                  defaults={'name': f'Can {codename.replace("_", " ")}'}
+              # Права для рецептов
+              recipe_ct = ContentType.objects.get_for_model(Recipe)
+              recipe_perms = []
+              for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
+                  perm, created = Permission.objects.get_or_create(
+                      codename=codename,
+                      content_type=recipe_ct,
+                      defaults={'name': f'Can {codename.replace("_", " ")}'}
+                  )
+                  recipe_perms.append(perm)
+
+              # Добавляем все права группе
+              group.permissions.add(*recipe_perms)
+
+              # Удаляем старого пользователя если есть
+              User.objects.filter(username='testuser').delete()
+
+              # Создаем активного пользователя
+              user = User.objects.create_user(
+                  username='testuser',
+                  password='testpass123',
+                  email='test@example.com',
+                  is_active=True
               )
-              recipe_perms.append(perm)
 
-          # Добавляем все права группе
-          group.permissions.add(*recipe_perms)
+              # Добавляем пользователя в группу
+              user.groups.add(group)
 
-          # Удаляем старого пользователя если есть
-          User.objects.filter(username='testuser').delete()
+              # Подтверждаем email
+              EmailAddress.objects.create(
+                  user=user,
+                  email=user.email,
+                  verified=True,
+                  primary=True
+              )
 
-          # Создаем активного пользователя
-          user = User.objects.create_user(
-              username='testuser',
-              password='testpass123',
-              email='test@example.com',
-              is_active=True
-          )
+              # Добавляем пользователя в пространство
+              user.space_set.add(space)
 
-          # Добавляем пользователя в группу
-          user.groups.add(group)
-
-          # Подтверждаем email
-          EmailAddress.objects.create(
-              user=user,
-              email=user.email,
-              verified=True,
-              primary=True
-          )
-
-          # Добавляем пользователя в пространство
-          user.space_set.add(space)
-
-          # Делаем пользователя владельцем пространства
-          space.created_by = user
-          space.save()
-          # Создаем настройки пользователя
-          UserPreference.objects.get_or_create(user=user)
+              # Делаем пользователя владельцем пространства
+              space.created_by = user
+              space.save()
+              # Создаем настройки пользователя
+              UserPreference.objects.get_or_create(user=user)
           
-          print(" User created successfully")
+              print(" User created successfully")
           EOF
-       
+          
           # Ждем готовности API
           echo "Waiting for API to be ready..."
           timeout=30
