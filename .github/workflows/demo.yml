@@ -178,10 +178,10 @@ jobs:
                       print(response.json().get('token', ''))
                       break
               except Exception as e:
-            print(f'Attempt {i+1} failed, retrying...')
-          time.sleep(4)
-          print(token)
-          ")
+                  print(f'Attempt {i+1} failed, retrying...')
+                  time.sleep(4)
+                  print(token)
+              ")
        
       - name: Test token manually
         run: |
