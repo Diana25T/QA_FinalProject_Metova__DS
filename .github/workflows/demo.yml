@@ -107,12 +107,13 @@ jobs:
 
               # Добавляем пользователя в пространство
              user.spaces.add(space)
-    
+             
              # Создаем необходимые настройки пользователя
              pref, created = UserPreference.objects.get_or_create(
                  user=user,
                  space=space
              )
+             
              # СОЗДАЕМ ТОКЕН
              token, created = Token.objects.get_or_create(user=user)
              print(token.key) 
