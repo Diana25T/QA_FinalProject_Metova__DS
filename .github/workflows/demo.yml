@@ -150,11 +150,13 @@ jobs:
           EOF
 
               # Теперь создаем токен через API (пользователь уже существует!)
-              TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
-                -H "Content-Type: application/json" \
-                -u testuser:testpass123 \
-                -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
-                | jq -r '.token')
+              TOKEN=$(docker compose exec -T web_recipes sh -c '
+                curl -s -X POST http://127.0.0.1:8000/api/access-token/ \
+                  -H "Content-Type: application/json" \
+                  -u testuser:testpass123 \
+                  -d "{\"expires\": \"2026-12-31T23:59:59Z\", \"scope\": \"read write\"}" \
+                  | jq -r ".token"
+              ')
           
               echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
               echo "::add-mask::$TOKEN"
