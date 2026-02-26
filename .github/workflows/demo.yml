@@ -161,17 +161,22 @@ jobs:
             sleep 2
             counter=$((counter + 2))
             done 
-             
-          # Устанавливаем jq в контейнер
-          docker compose exec -T web_recipes apt-get update && apt-get install -y jq
-          
-          # Создаем токен через API
-          TOKEN=$(curl -s -X POST http://localhost/api/access-token/ \
-           -H "Content-Type: application/json" \
-            -u testuser:testpass123 \
-            -d "{\"expires\": \"2026-12-31T23:59:59Z\", \"scope\": \"read write\"}" \
-            | jq -r '.token')
-          
+            
+           # Создаем токен через Python ВНУТРИ КОНТЕЙНЕРА на порт 80
+           TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
+           import requests
+           import json
+           response = requests.post(
+               'http://localhost:80/api/access-token/',
+               auth=('testuser', 'testpass123'),
+               json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'}
+          )
+          if response.status_code == 200:
+              token = response.json().get('token', '')
+              print(token)
+          else:
+              print('')
+          ")
           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "::add-mask::$TOKEN"
           
@@ -181,7 +186,7 @@ jobs:
             echo " Failed to extract token"
             exit 1
           fi
-      
+          
       - name: Test token manually
         run: |
           curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
