@@ -71,7 +71,7 @@ jobs:
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
           echo "✓ Migrations completed"
 
-      - name: Create user and complete space setup
+      - name: Create user with active space
         run: |
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
           from django.contrib.auth.models import User, Group, Permission
@@ -85,91 +85,61 @@ jobs:
                   Space.objects.filter(created_by=old_user).delete()
                   old_user.delete()
               
+              # 1. Создаем User БЕЗ space
               user = User.objects.create_superuser(
                   username='testuser',
                   password='testpass123',
                   email='test@example.com'
               )
               
-              # Группа с правами
+              # 2. Группа с правами
               group, created = Group.objects.get_or_create(name='Default')
               cookbook_perms = Permission.objects.filter(content_type__app_label='cookbook')
               for perm in cookbook_perms:
                   group.permissions.add(perm)
               user.groups.add(group)
               
+              # 3. Email
               EmailAddress.objects.get_or_create(
                   user=user,
                   email=user.email,
                   defaults={'verified': True, 'primary': True}
               )
               
-              # Space с завершенным setup!
+              # 4. Создаем Space
               space = Space.objects.create(
                   name='Test Space',
                   created_by=user,
-                  space_setup_completed=True,  # ← КЛЮЧЕВОЕ ПОЛЕ!
+                  space_setup_completed=True,
                   allow_sharing=True,
                   demo=False
               )
               
-              user.space = space
-              user.save()
-              
-              # UserSpace с правами
-              user_space, _ = UserSpace.objects.get_or_create(
+              # 5. UserSpace связь
+              UserSpace.objects.create(
                   user=user,
                   space=space,
-                  defaults={
-                      'active': True,
-                      'invite_link': None
-                  }
+                  active=True
               )
               
-              # UserPreference
+              # 6. ТЕПЕРЬ устанавливаем активный space
+              # Используем обновление напрямую в БД
+              User.objects.filter(id=user.id).update(space=space)
+              
+              # Перечитываем user из БД
+              user.refresh_from_db()
+              
+              # 7. UserPreference
               UserPreference.objects.get_or_create(user=user)
               
               print(f"✓ User: {user.username}")
               print(f"  Groups: {[g.name for g in user.groups.all()]}")
-              print(f"  Permissions: {group.permissions.count()}")
-              print(f"  Space: {space.name}")
+              print(f"  Active space: {user.space.name if user.space else 'NOT SET!'}")
               print(f"  Space setup completed: {space.space_setup_completed}")
-              print(f"  UserSpace active: {user_space.active}")
+              print(f"  UserSpace active: {UserSpace.objects.get(user=user, space=space).active}")
           EOF
 
-      - name: Debug Space selection
-        run: |
-          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User
-          from cookbook.models import Space, UserSpace
-          from django_scopes import scopes_disabled
-          
-          with scopes_disabled():
-              user = User.objects.get(username='testuser')
-              
-              print("\n=== Checking Space relations ===")
-              print(f"User fields with 'space': {[f.name for f in user._meta.get_fields() if 'space' in f.name.lower()]}")
-              
-              # Проверяем reverse relation
-              print(f"\nUser.space_set (if exists): {hasattr(user, 'space_set')}")
-              if hasattr(user, 'space_set'):
-                  spaces = user.space_set.all()
-                  print(f"Spaces via space_set: {[s.name for s in spaces]}")
-              
-              # Проверяем через UserSpace
-              user_spaces = UserSpace.objects.filter(user=user)
-              print(f"\nUserSpace entries: {user_spaces.count()}")
-              for us in user_spaces:
-                  print(f"  - {us.space.name} (active: {us.active})")
-                  print(f"    UserSpace fields: {[f.name for f in us._meta.get_fields()]}")
-          EOF
-
-      - name: Check Tandoor session/middleware
-        run: |
-          echo "Checking container logs for space selection hints..."
-          docker compose logs web_recipes 2>&1 | grep -i "space\|permission" | tail -30 || echo "No relevant logs"
-
-      - name: Login via Web
+      - name: Login and test
         run: |
           echo "🔐 Logging in..."
           
@@ -185,62 +155,24 @@ jobs:
           
           echo "✓ Login completed"
           
-          # Проверяем главную страницу
+          # Тестируем главную
           echo ""
           echo "Testing home page:"
-          HOME_RESPONSE=$(curl -s -b /tmp/cookies.txt http://localhost/)
+          HOME_TITLE=$(curl -s -b /tmp/cookies.txt http://localhost/ | grep -oP '<title>\K[^<]+')
+          echo "Page title: $HOME_TITLE"
           
-          if echo "$HOME_RESPONSE" | grep -q "No Permissions"; then
-            echo "❌ Still getting 'No Permissions' on home page!"
+          if [ "$HOME_TITLE" = "No Permissions" ]; then
+            echo "❌ Still No Permissions!"
             
-            # Выводим что Tandoor говорит
-            echo "$HOME_RESPONSE" | grep -A 5 "No Permissions" | head -10
-            
+            # Проверяем что говорят логи
             echo ""
-            echo "Debugging user state in database:"
-            docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'DBGEOF'
-          from django.contrib.auth.models import User
-          from cookbook.models import Space, UserSpace, UserPreference
-          from django_scopes import scopes_disabled
-          
-          with scopes_disabled():
-              user = User.objects.get(username='testuser')
-              
-              print(f"\n=== User Debug ===")
-              print(f"is_active: {user.is_active}")
-              print(f"is_superuser: {user.is_superuser}")
-              print(f"email_verified: {user.emailaddress_set.filter(verified=True).exists()}")
-              print(f"groups: {list(user.groups.values_list('name', flat=True))}")
-              print(f"user.space: {user.space.name if user.space else None}")
-              
-              if user.space:
-                  space = user.space
-                  print(f"\n=== Space Debug ===")
-                  print(f"name: {space.name}")
-                  print(f"created_by: {space.created_by.username if space.created_by else None}")
-                  print(f"space_setup_completed: {space.space_setup_completed}")
-                  print(f"demo: {space.demo}")
-                  print(f"allow_sharing: {space.allow_sharing}")
-              
-              user_spaces = UserSpace.objects.filter(user=user)
-              print(f"\n=== UserSpace Debug ===")
-              print(f"count: {user_spaces.count()}")
-              for us in user_spaces:
-                  print(f"space: {us.space.name}, active: {us.active}")
-              
-              try:
-                  pref = UserPreference.objects.get(user=user)
-                  print(f"\n=== UserPreference Debug ===")
-                  print(f"exists: True")
-                  print(f"fields: {[f.name for f in pref._meta.fields][:10]}")
-              except:
-                  print(f"UserPreference: NOT FOUND")
-          DBGEOF
+            echo "Recent container logs:"
+            docker compose logs web_recipes --tail=50 | grep -v "GET /static" | tail -20
             
             exit 1
           fi
           
-          echo "✓ Home page accessible!"
+          echo "✓ Home page OK!"
           
           # Тестируем API
           echo ""
@@ -250,6 +182,13 @@ jobs:
             http://localhost/api/recipe/)
           
           echo "HTTP $HTTP_CODE"
+          
+          if grep -q "<!DOCTYPE html>" /tmp/response.txt; then
+            echo "❌ Got HTML instead of JSON"
+            cat /tmp/response.txt | head -c 500
+            exit 1
+          fi
+          
           cat /tmp/response.txt | head -c 300
           echo ""
           
@@ -287,7 +226,6 @@ jobs:
           if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
             echo "✓ Token: ${TOKEN:0:8}..."
             
-            # Тест Bearer
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer $TOKEN" \
               http://localhost/api/recipe/)
