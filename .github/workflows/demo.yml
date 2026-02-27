@@ -71,10 +71,10 @@ jobs:
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
           echo "✓ Migrations completed"
 
-      - name: Create user
+      - name: Create user with group
         run: |
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User
+          from django.contrib.auth.models import User, Group
           from cookbook.models import Space, UserPreference, UserSpace
           from allauth.account.models import EmailAddress
           from django_scopes import scopes_disabled
@@ -90,6 +90,10 @@ jobs:
                   password='testpass123',
                   email='test@example.com'
               )
+              
+              # КРИТИЧНО: Добавляем в группу Default!
+              group, created = Group.objects.get_or_create(name='Default')
+              user.groups.add(group)
               
               EmailAddress.objects.get_or_create(
                   user=user,
@@ -108,7 +112,9 @@ jobs:
               UserSpace.objects.create(user=user, space=space, active=True)
               UserPreference.objects.get_or_create(user=user)
               
-              print(f"✓ User: {user.username}, Space: {space.name}")
+              print(f"✓ User: {user.username}")
+              print(f"  Groups: {[g.name for g in user.groups.all()]}")
+              print(f"  Space: {space.name}")
           EOF
 
       - name: Login via Web and get Session Cookie
@@ -138,6 +144,15 @@ jobs:
             http://localhost/api/recipe/)
           
           echo "HTTP $HTTP_CODE"
+          
+          # Проверяем что ответ НЕ HTML
+          if grep -q "<!DOCTYPE html>" /tmp/response.txt; then
+            echo "❌ Received HTML instead of JSON!"
+            cat /tmp/response.txt | head -c 500
+            echo ""
+            exit 1
+          fi
+          
           cat /tmp/response.txt | head -c 300
           echo ""
           
@@ -150,8 +165,7 @@ jobs:
             echo "::add-mask::$SESSION_COOKIE"
             
           else
-            echo "❌ Session auth failed"
-            cat /tmp/cookies.txt
+            echo "❌ Session auth failed with HTTP $HTTP_CODE"
             exit 1
           fi
 
@@ -170,6 +184,14 @@ jobs:
             http://localhost/api/access-token/)
           
           echo "Token Response: $TOKEN_RESPONSE"
+          
+          # Проверяем что это JSON, а не HTML
+          if echo "$TOKEN_RESPONSE" | grep -q "<!DOCTYPE html>"; then
+            echo "❌ Received HTML instead of JSON!"
+            echo "$TOKEN_RESPONSE" | head -c 500
+            echo ""
+            exit 1
+          fi
           
           TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
           
@@ -195,12 +217,13 @@ jobs:
             echo ""
             
             if [ "$HTTP_CODE" = "200" ]; then
-              echo "✓ Bearer Token works!"
+              echo "✓✓✓ Bearer Token works!"
             else
-              echo "⚠️  Bearer returned HTTP $HTTP_CODE (session cookie works anyway)"
+              echo "⚠️  Bearer returned HTTP $HTTP_CODE"
             fi
           else
-            echo "⚠️  Could not get API token (using session cookie)"
+            echo "❌ Could not get API token!"
+            exit 1
           fi
 
       - name: Run API tests
