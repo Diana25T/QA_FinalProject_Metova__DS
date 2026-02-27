@@ -232,9 +232,8 @@ jobs:
           print(f"SOCIAL_DEFAULT_GROUP: {getattr(settings, 'SOCIAL_DEFAULT_GROUP', 'Not set')}")
           EOF
 
-      - name: Create user with FULL admin access
+      - name: Create user with proper cleanup
         run: |
-          # Используем superuser для тестов (это тестовая среда!)
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
           from django.contrib.auth.models import User
           from cookbook.models import Space, UserPreference, UserSpace
@@ -242,9 +241,11 @@ jobs:
           from django_scopes import scopes_disabled
           
           with scopes_disabled():
-              User.objects.filter(username='testuser').delete()
+              old_user = User.objects.filter(username='testuser').first()
+              if old_user:
+                  Space.objects.filter(created_by=old_user).delete()
+                  old_user.delete()
               
-              # ВРЕМЕННО используем superuser для тестов
               user = User.objects.create_superuser(
                   username='testuser',
                   password='testpass123',
@@ -257,33 +258,81 @@ jobs:
                   defaults={'verified': True, 'primary': True}
               )
               
-              space, _ = Space.objects.get_or_create(
+              space = Space.objects.create(
                   name='Test Space',
-                  defaults={'created_by': user}
+                  created_by=user
               )
-              
-              if space.created_by != user:
-                  space.created_by = user
-                  space.save()
               
               user.space = space
               user.save()
               
-              UserSpace.objects.get_or_create(
-                  user=user,
-                  space=space,
-                  defaults={'active': True}
-              )
-              
+              UserSpace.objects.create(user=user, space=space, active=True)
               UserPreference.objects.get_or_create(user=user)
               
-              print(f"✓ SUPERUSER created: {user.username}")
-              print(f"  For testing purposes only!")
-              print(f"  Space: {space.name}")
+              print(f"✓ User: {user.username}, Space: {space.name}")
           EOF
           
           sleep 3
+
+      - name: Create OAuth2 Application and Token
+        run: |
+          # Создаем OAuth2 приложение и токен
+          OAUTH_DATA=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.contrib.auth.models import User
+          from oauth2_provider.models import Application, AccessToken
+          from django.utils import timezone
+          from datetime import timedelta
+          from django_scopes import scopes_disabled
+          import secrets
           
+          with scopes_disabled():
+              user = User.objects.get(username='testuser')
+              
+              # Создаем OAuth2 Application
+              app, _ = Application.objects.get_or_create(
+                  name='Test Client',
+                  user=user,
+                  defaults={
+                      'client_type': Application.CLIENT_CONFIDENTIAL,
+                      'authorization_grant_type': Application.GRANT_PASSWORD,
+                      'redirect_uris': '',
+                  }
+              )
+              
+              # Удаляем старые токены
+              AccessToken.objects.filter(user=user).delete()
+              
+              # Создаем OAuth2 Access Token
+              token = AccessToken.objects.create(
+                  user=user,
+                  application=app,
+                  token=secrets.token_urlsafe(40),
+                  expires=timezone.now() + timedelta(days=365),
+                  scope='read write'
+              )
+              
+              # Выводим токен
+              print(token.token)
+          EOF
+          )
+          
+          # Извлекаем токен (последняя строка)
+          TOKEN=$(echo "$OAUTH_DATA" | tail -1)
+          
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "$TOKEN" > token.txt
+          echo "::add-mask::$TOKEN"
+          
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
+            echo "✓ OAuth2 Token: ${TOKEN:0:12}...${TOKEN: -4}"
+          else
+            echo "❌ Failed to create OAuth2 token!"
+            echo "Full output: $OAUTH_DATA"
+            exit 1
+          fi
+
+      - name: Wait for API
+        run: |
           echo "⏳ Waiting for API..."
           for i in {1..30}; do
             if curl -s http://localhost/api/ > /dev/null 2>&1; then
@@ -292,128 +341,50 @@ jobs:
             fi
             sleep 2
           done
-          
-          echo "🔑 Creating token..."
-          TOKEN_RESPONSE=$(curl -s -X POST \
-            http://localhost/api/access-token/ \
-            -u testuser:testpass123 \
-            -H "Content-Type: application/json" \
-            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}')
-          
-          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
-          
-          if [ -z "$TOKEN" ]; then
-            TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
-          fi
-          
-          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-          echo "$TOKEN" > token.txt
-          echo "::add-mask::$TOKEN"
-          
-          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
-            echo "✓ Token: ${TOKEN:0:8}...${TOKEN: -4}"
-          else
-            echo "❌ Failed!"
-            exit 1
-          fi
 
-      - name: Verify token with multiple endpoints
+      - name: Test OAuth2 Bearer Token
         run: |
           if [ -z "$TANDOOR_TOKEN" ]; then
             export TANDOOR_TOKEN=$(cat token.txt)
           fi
           
-          echo "🧪 Testing token on multiple endpoints..."
-          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
-          echo ""
-          
-          # Test 1: User preference (должно работать)
-          echo "1. /api/user-preference/"
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/user-preference/)
-          echo "   HTTP $HTTP_CODE"
-          
-          # Test 2: Space
-          echo "2. /api/space/"
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/space/)
-          echo "   HTTP $HTTP_CODE"
-          
-          # Test 3: Recipe
-          echo "3. /api/recipe/"
-          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/recipe/)
-          echo "   HTTP $HTTP_CODE"
-          cat /tmp/response.txt | head -c 200
-          echo ""
-          
-          # Test 4: Food
-          echo "4. /api/food/"
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/food/)
-          echo "   HTTP $HTTP_CODE"
-          
-          # Test 5: Keyword
-          echo "5. /api/keyword/"
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/keyword/)
-          echo "   HTTP $HTTP_CODE"
-          
-          echo ""
-          
-          # Финальная проверка
-          RECIPE_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/recipe/)
-          
-          if [ "$RECIPE_CODE" = "200" ]; then
-            echo "✓✓✓ Token works for recipes!"
-          else
-            echo "❌ Recipe endpoint still returns HTTP $RECIPE_CODE"
-            
-            # Показываем полный ответ
-            echo ""
-            echo "Full recipe response:"
-            curl -s -H "Authorization: Bearer $TANDOOR_TOKEN" \
-              http://localhost/api/recipe/
-            
-            echo ""
-            echo ""
-            echo "Container logs (last 50 lines):"
-            docker compose logs web_recipes --tail=50
-            
-            exit 1
-          fi
-
-      - name: Verify token
-        run: |
-          if [ -z "$TANDOOR_TOKEN" ]; then
-            export TANDOOR_TOKEN=$(cat token.txt)
-          fi
-          
-          echo "Testing token..."
-          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
+          echo "🧪 Testing OAuth2 Bearer Token..."
+          echo "Token: ${TANDOOR_TOKEN:0:12}...${TANDOOR_TOKEN: -4}"
           
           HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
             -H "Authorization: Bearer $TANDOOR_TOKEN" \
             http://localhost/api/recipe/)
           
           echo "HTTP $HTTP_CODE"
-          cat /tmp/response.txt | head -c 200
+          cat /tmp/response.txt | head -c 300
           echo ""
           
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "✓✓✓ Token works!"
+            echo "✓✓✓ OAuth2 Bearer Token works!"
           else
-            echo "❌ Still failing with HTTP $HTTP_CODE"
+            echo "❌ Failed with HTTP $HTTP_CODE"
             echo ""
             echo "Full response:"
             cat /tmp/response.txt
+            echo ""
+            
+            # Проверяем что токен в базе
+            docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from oauth2_provider.models import AccessToken
+          from django_scopes import scopes_disabled
+          
+          with scopes_disabled():
+              tokens = AccessToken.objects.all()[:3]
+              print(f"\n=== OAuth2 Tokens in DB: {tokens.count()} ===")
+              for t in tokens:
+                  print(f"Token: {t.token[:12]}...{t.token[-4:]}")
+                  print(f"User: {t.user.username}")
+                  print(f"Scope: {t.scope}")
+                  print(f"Expires: {t.expires}")
+                  print(f"Valid: {not t.is_expired()}")
+                  print("---")
+          EOF
+            
             exit 1
           fi
 
@@ -425,9 +396,13 @@ jobs:
             export TANDOOR_TOKEN=$(cat token.txt)
           fi
           
-          export APP_URL=http://localhost
+          # Ваш класс использует BASE_URL, не APP_URL
+          export BASE_URL=http://localhost
           
           echo "🚀 Running tests..."
+          echo "BASE_URL: $BASE_URL"
+          echo "Token: ${TANDOOR_TOKEN:0:12}..."
+          
           mkdir -p allure-results
           
           pytest tests/ \
@@ -438,7 +413,7 @@ jobs:
             -s
         continue-on-error: true
         env:
-          APP_URL: http://localhost
+          BASE_URL: http://localhost
           TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
 
       - name: Run API tests
