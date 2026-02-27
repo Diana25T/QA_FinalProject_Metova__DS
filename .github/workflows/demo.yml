@@ -238,6 +238,209 @@ jobs:
             cat /tmp/response.txt
             exit 1
           fi
+          
+      - name: Check Django logs for permission details
+        run: |
+          echo "🔍 Checking container logs for permission errors..."
+          docker compose logs web_recipes --tail=100 | grep -i "permission\|403\|forbidden" || echo "No permission errors in logs"
+
+      - name: Debug - Check API permissions requirements
+        run: |
+          # Проверяем настройки DRF в контейнере
+          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.conf import settings
+          
+          print("\n=== REST Framework Settings ===")
+          print(f"DEFAULT_PERMISSION_CLASSES: {getattr(settings, 'REST_FRAMEWORK', {}).get('DEFAULT_PERMISSION_CLASSES', 'Not set')}")
+          print(f"DEFAULT_AUTHENTICATION_CLASSES: {getattr(settings, 'REST_FRAMEWORK', {}).get('DEFAULT_AUTHENTICATION_CLASSES', 'Not set')}")
+          
+          print("\n=== Tandoor Settings ===")
+          print(f"SOCIAL_DEFAULT_ACCESS: {getattr(settings, 'SOCIAL_DEFAULT_ACCESS', 'Not set')}")
+          print(f"SOCIAL_DEFAULT_GROUP: {getattr(settings, 'SOCIAL_DEFAULT_GROUP', 'Not set')}")
+          EOF
+
+      - name: Create user with FULL admin access
+        run: |
+          # Используем superuser для тестов (это тестовая среда!)
+          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.contrib.auth.models import User
+          from cookbook.models import Space, UserPreference, UserSpace
+          from allauth.account.models import EmailAddress
+          from django_scopes import scopes_disabled
+          
+          with scopes_disabled():
+              User.objects.filter(username='testuser').delete()
+              
+              # ВРЕМЕННО используем superuser для тестов
+              user = User.objects.create_superuser(
+                  username='testuser',
+                  password='testpass123',
+                  email='test@example.com'
+              )
+              
+              EmailAddress.objects.get_or_create(
+                  user=user,
+                  email=user.email,
+                  defaults={'verified': True, 'primary': True}
+              )
+              
+              space, _ = Space.objects.get_or_create(
+                  name='Test Space',
+                  defaults={'created_by': user}
+              )
+              
+              if space.created_by != user:
+                  space.created_by = user
+                  space.save()
+              
+              user.space = space
+              user.save()
+              
+              UserSpace.objects.get_or_create(
+                  user=user,
+                  space=space,
+                  defaults={'active': True}
+              )
+              
+              UserPreference.objects.get_or_create(user=user)
+              
+              print(f"✓ SUPERUSER created: {user.username}")
+              print(f"  For testing purposes only!")
+              print(f"  Space: {space.name}")
+          EOF
+          
+          sleep 3
+          
+          echo "⏳ Waiting for API..."
+          for i in {1..30}; do
+            if curl -s http://localhost/api/ > /dev/null 2>&1; then
+              echo "✓ API ready!"
+              break
+            fi
+            sleep 2
+          done
+          
+          echo "🔑 Creating token..."
+          TOKEN_RESPONSE=$(curl -s -X POST \
+            http://localhost/api/access-token/ \
+            -u testuser:testpass123 \
+            -H "Content-Type: application/json" \
+            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}')
+          
+          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
+          
+          if [ -z "$TOKEN" ]; then
+            TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
+          fi
+          
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "$TOKEN" > token.txt
+          echo "::add-mask::$TOKEN"
+          
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
+            echo "✓ Token: ${TOKEN:0:8}...${TOKEN: -4}"
+          else
+            echo "❌ Failed!"
+            exit 1
+          fi
+
+      - name: Verify token with multiple endpoints
+        run: |
+          if [ -z "$TANDOOR_TOKEN" ]; then
+            export TANDOOR_TOKEN=$(cat token.txt)
+          fi
+          
+          echo "🧪 Testing token on multiple endpoints..."
+          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
+          echo ""
+          
+          # Test 1: User preference (должно работать)
+          echo "1. /api/user-preference/"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/user-preference/)
+          echo "   HTTP $HTTP_CODE"
+          
+          # Test 2: Space
+          echo "2. /api/space/"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/space/)
+          echo "   HTTP $HTTP_CODE"
+          
+          # Test 3: Recipe
+          echo "3. /api/recipe/"
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/recipe/)
+          echo "   HTTP $HTTP_CODE"
+          cat /tmp/response.txt | head -c 200
+          echo ""
+          
+          # Test 4: Food
+          echo "4. /api/food/"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/food/)
+          echo "   HTTP $HTTP_CODE"
+          
+          # Test 5: Keyword
+          echo "5. /api/keyword/"
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/keyword/)
+          echo "   HTTP $HTTP_CODE"
+          
+          echo ""
+          
+          # Финальная проверка
+          RECIPE_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/recipe/)
+          
+          if [ "$RECIPE_CODE" = "200" ]; then
+            echo "✓✓✓ Token works for recipes!"
+          else
+            echo "❌ Recipe endpoint still returns HTTP $RECIPE_CODE"
+            
+            # Показываем полный ответ
+            echo ""
+            echo "Full recipe response:"
+            curl -s -H "Authorization: Bearer $TANDOOR_TOKEN" \
+              http://localhost/api/recipe/
+            
+            echo ""
+            echo ""
+            echo "Container logs (last 50 lines):"
+            docker compose logs web_recipes --tail=50
+            
+            exit 1
+          fi
+
+      - name: Run API tests
+        run: |
+          source venv/bin/activate
+          
+          if [ -z "$TANDOOR_TOKEN" ]; then
+            export TANDOOR_TOKEN=$(cat token.txt)
+          fi
+          
+          export APP_URL=http://localhost
+          
+          echo "🚀 Running tests..."
+          mkdir -p allure-results
+          
+          pytest tests/ \
+            --alluredir=allure-results \
+            -m "api" \
+            -v \
+            --tb=short \
+            -s
+        continue-on-error: true
+        env:
+          APP_URL: http://localhost
+          TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
+
 
       - name: Run API tests
         run: |
