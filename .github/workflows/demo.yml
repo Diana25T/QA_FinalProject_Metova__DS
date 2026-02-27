@@ -155,6 +155,61 @@ jobs:
             exit 1
           fi
 
+      - name: Debug - Test token
+        run: |
+          echo " Testing token..."
+          
+          # Проверяем что токен в ENV
+          if [ -z "$TANDOOR_TOKEN" ]; then
+            echo "  Token not in ENV, reading from file..."
+            export TANDOOR_TOKEN=$(cat token.txt)
+          fi
+          
+          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
+          
+          # Тестируем curl'ом
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/recipe/)
+          
+          echo "HTTP Response: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✓ Token works!"
+          else
+            echo "❌ Token test failed!"
+            curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+              http://localhost/api/recipe/ 2>&1 | head -20
+          fi
+          
+      - name: Run API tests
+        run: |
+          source venv/bin/activate
+          
+          # Гарантируем что токен установлен
+          if [ -z "$TANDOOR_TOKEN" ]; then
+            export TANDOOR_TOKEN=$(cat token.txt)
+          fi
+          
+          export APP_URL=http://localhost
+          
+          echo " Starting tests..."
+          echo "APP_URL: $APP_URL"
+          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
+          
+          mkdir -p allure-results
+          
+          pytest tests/ \
+            --alluredir=allure-results \
+            -m "api" \
+            -v \
+            --tb=short \
+            -s
+        env:
+          APP_URL: http://localhost
+          TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
+
+
       - name: Test token manually
         run: |
           curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
