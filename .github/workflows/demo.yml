@@ -86,7 +86,7 @@ jobs:
       - name: Create test user and token
         run: |
           # Сначала создаем пользователя
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell << 'EOF'
+          TOKEN=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF' | grep -E '^[a-f0-9]{40}$' | head -1
           from django.contrib.auth.models import User, Group, Permission
           from django.contrib.contenttypes.models import ContentType
           from cookbook.models import UserPreference, Space, Recipe
@@ -186,6 +186,32 @@ jobs:
             echo " Failed to extract token"
             exit 1
           fi
+            # Выведем ошибки для диагностики
+              docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.contrib.auth.models import User
+          from rest_framework.authtoken.models import Token
+          from cookbook.models import UserPreference, Space
+          from django_scopes import scopes_disabled
+          
+          try:
+              with scopes_disabled():
+                  print("Checking existing users...")
+                  users = User.objects.filter(username='testuser')
+                  print(f"Found users: {users.count()}")
+                  
+                  space = Space.objects.first()
+                  print(f"Space: {space}")
+                  
+                  token = Token.objects.first()
+                  print(f"Existing token: {token}")
+                  
+                  if token:
+                      print(token.key)
+          except Exception as e:
+              print(f"Error: {e}")
+          EOF
+              exit 1
+          fi            
           
       - name: Test token manually
         run: |
