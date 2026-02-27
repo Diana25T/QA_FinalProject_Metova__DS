@@ -85,45 +85,73 @@ jobs:
           echo "=== Web Container Logs ==="
           docker compose logs web_recipes --tail=50
 
-      - name: Create user via Django admin command and setup
+      - name: Create user and token
         run: |
-          # 1. Создаем суперпользователя
-          docker compose exec -T web_recipes sh -c "
-            cd /opt/recipes && \
-            echo \"from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.filter(username='testuser').delete(); User.objects.create_superuser('testuser', 'test@example.com', 'testpass123')\" | \
-            venv/bin/python manage.py shell
-          "
-          
-          sleep 3
-          
-          # 2. Настраиваем пользователя
+          # Создаем ОБЫЧНОГО пользователя с правами
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User
-          from cookbook.models import Space, UserPreference
+          from django.contrib.auth.models import User, Group, Permission
+          from django.contrib.contenttypes.models import ContentType
+          from cookbook.models import Space, UserPreference, Recipe
           from allauth.account.models import EmailAddress
           from django_scopes import scopes_disabled
           
           with scopes_disabled():
-              user = User.objects.get(username='testuser')
+              # Удаляем старого пользователя
+              User.objects.filter(username='testuser').delete()
               
+              # Создаем ОБЫЧНОГО активного пользователя
+              user = User.objects.create_user(
+                  username='testuser',
+                  password='testpass123',
+                  email='test@example.com',
+                  is_active=True,
+                  is_staff=False,      # НЕ staff
+                  is_superuser=False   # НЕ superuser
+              )
+              
+              # Получаем или создаем группу с правами
+              group, _ = Group.objects.get_or_create(name='Recipe Users')
+              
+              # Добавляем права на рецепты
+              recipe_ct = ContentType.objects.get_for_model(Recipe)
+              permissions = [
+                  'view_recipe',
+                  'add_recipe',
+                  'change_recipe',
+                  'delete_recipe',
+              ]
+              
+              for perm_codename in permissions:
+                  try:
+                      perm = Permission.objects.get(
+                          codename=perm_codename,
+                          content_type=recipe_ct
+                      )
+                      group.permissions.add(perm)
+                  except Permission.DoesNotExist:
+                      print(f"Warning: Permission {perm_codename} not found")
+              
+              # Добавляем пользователя в группу
+              user.groups.add(group)
+              
+              # Подтверждаем email
               EmailAddress.objects.get_or_create(
                   user=user,
                   email=user.email,
                   defaults={'verified': True, 'primary': True}
               )
               
+              # Создаем Space с пользователем как владельцем
               space, created = Space.objects.get_or_create(
-                  name='Default Space',
+                  name='Test Space',
                   defaults={'created_by': user}
               )
               
-              if not created:
+              if not created and space.created_by != user:
                   space.created_by = user
                   space.save()
               
-              if not space.user.filter(id=user.id).exists():
-                  space.user.add(user)
-              
+              # UserPreference - связывает пользователя со Space
               pref, _ = UserPreference.objects.get_or_create(
                   user=user,
                   defaults={'space': space}
@@ -133,11 +161,21 @@ jobs:
                   pref.space = space
                   pref.save()
               
-              print(f"✓ User: {user.username}, Space: {space.name} (ID: {space.id})")
+              # Проверяем что получилось
+              print(f"✓ User created: {user.username}")
+              print(f"  is_superuser: {user.is_superuser}")
+              print(f"  is_staff: {user.is_staff}")
+              print(f"  is_active: {user.is_active}")
+              print(f"  groups: {[g.name for g in user.groups.all()]}")
+              print(f"  permissions: {list(user.get_all_permissions())[:5]}")
+              print(f"  space: {space.name} (ID: {space.id})")
+              print(f"  space owner: {space.created_by.username if space.created_by else 'None'}")
           EOF
           
-          # 3. Ждем API
-          echo "⏳ Waiting for API..."
+          sleep 3
+          
+          # Ждем API
+          echo " Waiting for API..."
           for i in {1..30}; do
             if curl -s http://localhost/api/ > /dev/null 2>&1; then
               echo "✓ API ready!"
@@ -146,39 +184,83 @@ jobs:
             sleep 2
           done
           
-          # 4. Создаем токен с правами "read write"
-          echo "🔑 Creating token with 'read write' scope..."
-          
+          # Получаем токен через API
+          echo " Creating token with 'read write' scope..."
           TOKEN_RESPONSE=$(curl -s -X POST \
             http://localhost/api/access-token/ \
             -u testuser:testpass123 \
             -H "Content-Type: application/json" \
-            -d '{
-              "expires": "2026-12-31T23:59:59Z",
-              "scope": "read write"
-            }')
+            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}')
           
-          echo "API Response: $TOKEN_RESPONSE"
+          echo "Token Response: $TOKEN_RESPONSE"
           
-          # Извлекаем токен
           TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
           
           if [ -z "$TOKEN" ]; then
             TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
           fi
           
-          # Сохраняем
           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "$TOKEN" > token.txt
           echo "::add-mask::$TOKEN"
           
           if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
-            echo "✓ Token created: ${TOKEN:0:8}...${TOKEN: -4}"
+            echo "✓ Token: ${TOKEN:0:8}...${TOKEN: -4}"
           else
-            echo "❌ Token creation failed!"
-            echo "Full response: $TOKEN_RESPONSE"
+            echo "❌ Failed to get token!"
+            echo "Response: $TOKEN_RESPONSE"
+            
+            # Проверяем может ли пользователь войти
+            echo ""
+            echo "Testing basic auth:"
+            curl -v -u testuser:testpass123 http://localhost/api/user-preference/ 2>&1 | head -30
+            
             exit 1
           fi
+
+      - name: Verify user permissions
+        run: |
+          echo " Checking user permissions in database..."
+          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.contrib.auth.models import User
+          from cookbook.models import Space, UserPreference
+          from django_scopes import scopes_disabled
+          
+          with scopes_disabled():
+              user = User.objects.get(username='testuser')
+              
+              print(f"\n=== User Info ===")
+              print(f"Username: {user.username}")
+              print(f"is_superuser: {user.is_superuser} (should be False)")
+              print(f"is_staff: {user.is_staff} (should be False)")
+              print(f"is_active: {user.is_active} (should be True)")
+              
+              print(f"\n=== Groups ===")
+              for group in user.groups.all():
+                  print(f"- {group.name}")
+                  print(f"  Permissions: {group.permissions.count()}")
+              
+              print(f"\n=== User Permissions ===")
+              perms = user.get_all_permissions()
+              if perms:
+                  for perm in list(perms)[:10]:
+                      print(f"- {perm}")
+              else:
+                  print("WARNING: No permissions found!")
+              
+              print(f"\n=== Space Access ===")
+              try:
+                  pref = UserPreference.objects.get(user=user)
+                  if pref.space:
+                      space = pref.space
+                      print(f"Default space: {space.name}")
+                      print(f"Space owner: {space.created_by.username if space.created_by else 'None'}")
+                      print(f"User is owner: {space.created_by == user}")
+                  else:
+                      print("WARNING: No default space!")
+              except UserPreference.DoesNotExist:
+                  print("WARNING: No UserPreference found!")
+          EOF
 
       - name: Verify token works
         run: |
@@ -186,10 +268,12 @@ jobs:
             export TANDOOR_TOKEN=$(cat token.txt)
           fi
           
-          echo "🧪 Testing token..."
+          echo "Testing token..."
           echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
           
           # Тест READ
+          echo ""
+          echo "Test 1: GET /api/recipe/"
           HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
             -H "Authorization: Bearer $TANDOOR_TOKEN" \
             http://localhost/api/recipe/)
@@ -199,11 +283,22 @@ jobs:
           echo ""
           
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "✓✓✓ Token works!"
+            echo "✓ READ permission works!"
           else
-            echo "❌ Token test failed"
-            curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
-              http://localhost/api/recipe/ 2>&1 | head -30
+            echo "❌ READ failed with HTTP $HTTP_CODE"
+            
+            # Пробуем другие endpoints
+            echo ""
+            echo "Testing /api/user-preference/:"
+            curl -s -H "Authorization: Bearer $TANDOOR_TOKEN" \
+              http://localhost/api/user-preference/ | head -c 200
+            
+            echo ""
+            echo ""
+            echo "Testing /api/space/:"
+            curl -s -H "Authorization: Bearer $TANDOOR_TOKEN" \
+              http://localhost/api/space/ | head -c 200
+            
             exit 1
           fi
 
@@ -232,6 +327,7 @@ jobs:
         env:
           APP_URL: http://localhost
           TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
+
 
       - name: Upload Allure results
         uses: actions/upload-artifact@v4
