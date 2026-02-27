@@ -86,7 +86,7 @@ jobs:
       - name: Create test user and token
         run: |
           # Создаем пользователя и получаем токен
-          TOKEN=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          TOKEN=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF' | grep -E '^[a-f0-9]{40}$'
           from django.contrib.auth.models import User, Group, Permission
           from django.contrib.contenttypes.models import ContentType
           from cookbook.models import UserPreference, Space, Recipe
@@ -96,11 +96,9 @@ jobs:
           from datetime import datetime, timedelta
           
           with scopes_disabled():
-              # Создаем пространство и группу
               space, _ = Space.objects.get_or_create(name='Default Space')
               group, _ = Group.objects.get_or_create(name='Default')
               
-              # Добавляем права на рецепты
               recipe_ct = ContentType.objects.get_for_model(Recipe)
               for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
                   perm, _ = Permission.objects.get_or_create(
@@ -110,10 +108,8 @@ jobs:
                   )
                   group.permissions.add(perm)
               
-              # Удаляем старого пользователя
               User.objects.filter(username='testuser').delete()
               
-              # Создаем пользователя
               user = User.objects.create_user(
                   username='testuser',
                   password='testpass123',
@@ -121,7 +117,6 @@ jobs:
                   is_active=True
               )
               
-              # Настройки пользователя
               user.groups.add(group)
               user.space_set.add(space)
               EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
@@ -129,7 +124,6 @@ jobs:
               space.created_by = user
               space.save()
               
-              # Создаем токен
               Token.objects.filter(user=user).delete()
               token = Token.objects.create(user=user)
               
@@ -137,21 +131,24 @@ jobs:
                   token.expires = datetime.now() + timedelta(days=365)
                   token.save()
               
-              # Выводим только токен
               print(token.key)
           EOF
           )
           
-          # Сохраняем токен
+          # Убираем переносы строк и пробелы
+          TOKEN=$(echo "$TOKEN" | tr -d '\n\r ')
+          
+          # Сохраняем токен в ENV и файл
           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "$TOKEN" > token.txt
           echo "::add-mask::$TOKEN"
           
-          # Проверяем
-          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
-            echo "✓ Token created: ${TOKEN:0:8}..."
+          # Проверка
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -eq 40 ]; then
+            echo "✓ Token created: ${TOKEN:0:8}...${TOKEN: -4}"
           else
-            echo "❌ Token creation failed"
-            docker compose logs web_recipes --tail=20
+            echo "❌ Invalid token! Length: ${#TOKEN}"
+            echo "Raw output: '$TOKEN'"
             exit 1
           fi
 
