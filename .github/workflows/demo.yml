@@ -211,33 +211,6 @@ jobs:
             echo "❌ Failed!"
             exit 1
           fi
-
-      - name: Verify token
-        run: |
-          if [ -z "$TANDOOR_TOKEN" ]; then
-            export TANDOOR_TOKEN=$(cat token.txt)
-          fi
-          
-          echo "Testing token..."
-          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
-          
-          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/recipe/)
-          
-          echo "HTTP $HTTP_CODE"
-          cat /tmp/response.txt | head -c 200
-          echo ""
-          
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "✓✓✓ Token works!"
-          else
-            echo "❌ Still failing with HTTP $HTTP_CODE"
-            echo ""
-            echo "Full response:"
-            cat /tmp/response.txt
-            exit 1
-          fi
           
       - name: Check Django logs for permission details
         run: |
@@ -417,6 +390,33 @@ jobs:
             exit 1
           fi
 
+      - name: Verify token
+        run: |
+          if [ -z "$TANDOOR_TOKEN" ]; then
+            export TANDOOR_TOKEN=$(cat token.txt)
+          fi
+          
+          echo "Testing token..."
+          echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
+          
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            http://localhost/api/recipe/)
+          
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/response.txt | head -c 200
+          echo ""
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✓✓✓ Token works!"
+          else
+            echo "❌ Still failing with HTTP $HTTP_CODE"
+            echo ""
+            echo "Full response:"
+            cat /tmp/response.txt
+            exit 1
+          fi
+
       - name: Run API tests
         run: |
           source venv/bin/activate
@@ -440,7 +440,6 @@ jobs:
         env:
           APP_URL: http://localhost
           TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
-
 
       - name: Run API tests
         run: |
