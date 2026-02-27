@@ -85,28 +85,28 @@ jobs:
                   Space.objects.filter(created_by=old_user).delete()
                   old_user.delete()
               
-              # 1. Создаем User БЕЗ space
+              # Создаем User
               user = User.objects.create_superuser(
                   username='testuser',
                   password='testpass123',
                   email='test@example.com'
               )
               
-              # 2. Группа с правами
+              # Группа с правами
               group, created = Group.objects.get_or_create(name='Default')
               cookbook_perms = Permission.objects.filter(content_type__app_label='cookbook')
               for perm in cookbook_perms:
                   group.permissions.add(perm)
               user.groups.add(group)
               
-              # 3. Email
+              # Email
               EmailAddress.objects.get_or_create(
                   user=user,
                   email=user.email,
                   defaults={'verified': True, 'primary': True}
               )
               
-              # 4. Создаем Space
+              # Создаем Space
               space = Space.objects.create(
                   name='Test Space',
                   created_by=user,
@@ -115,28 +115,31 @@ jobs:
                   demo=False
               )
               
-              # 5. UserSpace связь
+              # UserSpace связь
               UserSpace.objects.create(
                   user=user,
                   space=space,
                   active=True
               )
               
-              # 6. ТЕПЕРЬ устанавливаем активный space
-              # Используем обновление напрямую в БД
-              User.objects.filter(id=user.id).update(space=space)
+              # Добавляем user в space через Many-to-Many
+              user.space_set.add(space)
               
-              # Перечитываем user из БД
-              user.refresh_from_db()
-              
-              # 7. UserPreference
+              # UserPreference
               UserPreference.objects.get_or_create(user=user)
+              
+              # Проверяем
+              user.refresh_from_db()
+              user_spaces = user.space_set.all()
               
               print(f"✓ User: {user.username}")
               print(f"  Groups: {[g.name for g in user.groups.all()]}")
-              print(f"  Active space: {user.space.name if user.space else 'NOT SET!'}")
+              print(f"  Member of spaces: {[s.name for s in user_spaces]}")
               print(f"  Space setup completed: {space.space_setup_completed}")
-              print(f"  UserSpace active: {UserSpace.objects.get(user=user, space=space).active}")
+              
+              # Проверяем UserSpace
+              us = UserSpace.objects.get(user=user, space=space)
+              print(f"  UserSpace active: {us.active}")
           EOF
 
       - name: Login and test
@@ -158,21 +161,26 @@ jobs:
           # Тестируем главную
           echo ""
           echo "Testing home page:"
-          HOME_TITLE=$(curl -s -b /tmp/cookies.txt http://localhost/ | grep -oP '<title>\K[^<]+')
+          HOME_RESPONSE=$(curl -s -b /tmp/cookies.txt http://localhost/)
+          HOME_TITLE=$(echo "$HOME_RESPONSE" | grep -oP '<title>\K[^<]+')
+          
           echo "Page title: $HOME_TITLE"
           
           if [ "$HOME_TITLE" = "No Permissions" ]; then
             echo "❌ Still No Permissions!"
             
-            # Проверяем что говорят логи
+            # Выводим больше информации
+            echo "$HOME_RESPONSE" | grep -A 3 "No Permissions"
+            
+            # Смотрим логи контейнера
             echo ""
-            echo "Recent container logs:"
-            docker compose logs web_recipes --tail=50 | grep -v "GET /static" | tail -20
+            echo "Container logs (last 30 non-static lines):"
+            docker compose logs web_recipes --tail=100 | grep -v "GET /static" | grep -v "GET /media" | tail -30
             
             exit 1
           fi
           
-          echo "✓ Home page OK!"
+          echo "✓ Home page accessible!"
           
           # Тестируем API
           echo ""
@@ -184,8 +192,8 @@ jobs:
           echo "HTTP $HTTP_CODE"
           
           if grep -q "<!DOCTYPE html>" /tmp/response.txt; then
-            echo "❌ Got HTML instead of JSON"
-            cat /tmp/response.txt | head -c 500
+            echo "❌ Got HTML"
+            cat /tmp/response.txt | grep -oP '<title>\K[^<]+'
             exit 1
           fi
           
@@ -195,13 +203,12 @@ jobs:
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✓✓✓ API works!"
           else
-            echo "❌ API failed"
             exit 1
           fi
 
       - name: Get API token
         run: |
-          echo "🔑 Getting API token..."
+          echo "🔑 Getting token..."
           
           CSRF_TOKEN=$(grep csrftoken /tmp/cookies.txt | awk '{print $7}')
           
@@ -209,15 +216,10 @@ jobs:
             -b /tmp/cookies.txt \
             -H "Content-Type: application/json" \
             -H "X-CSRFToken: $CSRF_TOKEN" \
-            -H "Referer: http://localhost/" \
             -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
             http://localhost/api/access-token/)
           
-          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
-          
-          if [ -z "$TOKEN" ]; then
-            TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
-          fi
+          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null)
           
           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "$TOKEN" > token.txt
@@ -225,27 +227,14 @@ jobs:
           
           if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
             echo "✓ Token: ${TOKEN:0:8}..."
-            
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer $TOKEN" \
-              http://localhost/api/recipe/)
-            
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "✓ Bearer Token works!"
-            fi
           fi
 
       - name: Run API tests
         run: |
           source venv/bin/activate
-          
-          if [ -f token.txt ]; then
-            export TANDOOR_TOKEN=$(cat token.txt)
-          fi
-          
+          export TANDOOR_TOKEN=$(cat token.txt 2>/dev/null || echo "")
           export BASE_URL=http://localhost
           
-          echo "🚀 Running tests..."
           mkdir -p allure-results
           
           pytest tests/ \
