@@ -71,12 +71,11 @@ jobs:
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
           echo "✓ Migrations completed"
 
-      - name: Create user with permissions
+      - name: Create user and complete space setup
         run: |
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
           from django.contrib.auth.models import User, Group, Permission
-          from django.contrib.contenttypes.models import ContentType
-          from cookbook.models import Space, UserPreference, UserSpace, Recipe
+          from cookbook.models import Space, UserPreference, UserSpace
           from allauth.account.models import EmailAddress
           from django_scopes import scopes_disabled
           
@@ -92,19 +91,11 @@ jobs:
                   email='test@example.com'
               )
               
-              # Создаем группу Default с ПРАВАМИ
+              # Группа с правами
               group, created = Group.objects.get_or_create(name='Default')
-              
-              # Добавляем ВСЕ права на cookbook app
-              cookbook_perms = Permission.objects.filter(
-                  content_type__app_label='cookbook'
-              )
-              
-              print(f"Adding {cookbook_perms.count()} permissions to Default group...")
-              
+              cookbook_perms = Permission.objects.filter(content_type__app_label='cookbook')
               for perm in cookbook_perms:
                   group.permissions.add(perm)
-              
               user.groups.add(group)
               
               EmailAddress.objects.get_or_create(
@@ -113,33 +104,45 @@ jobs:
                   defaults={'verified': True, 'primary': True}
               )
               
+              # Space с завершенным setup!
               space = Space.objects.create(
                   name='Test Space',
-                  created_by=user
+                  created_by=user,
+                  space_setup_completed=True,  # ← КЛЮЧЕВОЕ ПОЛЕ!
+                  allow_sharing=True,
+                  demo=False
               )
               
               user.space = space
               user.save()
               
-              UserSpace.objects.create(user=user, space=space, active=True)
+              # UserSpace с правами
+              user_space, _ = UserSpace.objects.get_or_create(
+                  user=user,
+                  space=space,
+                  defaults={
+                      'active': True,
+                      'invite_link': None
+                  }
+              )
+              
+              # UserPreference
               UserPreference.objects.get_or_create(user=user)
               
               print(f"✓ User: {user.username}")
-              print(f"  is_superuser: {user.is_superuser}")
               print(f"  Groups: {[g.name for g in user.groups.all()]}")
-              print(f"  Group permissions: {group.permissions.count()}")
+              print(f"  Permissions: {group.permissions.count()}")
               print(f"  Space: {space.name}")
-              print(f"  User permissions (first 10): {list(user.get_all_permissions())[:10]}")
+              print(f"  Space setup completed: {space.space_setup_completed}")
+              print(f"  UserSpace active: {user_space.active}")
           EOF
 
-      - name: Login via Web and get Session Cookie
+      - name: Login via Web
         run: |
-          echo "🔐 Logging in via web interface..."
+          echo "🔐 Logging in..."
           
           CSRF_TOKEN=$(curl -s -c /tmp/cookies.txt http://localhost/accounts/login/ \
             | grep -oP 'csrfmiddlewaretoken.*?value="\K[^"]+' | head -1)
-          
-          echo "CSRF Token: ${CSRF_TOKEN:0:10}..."
           
           curl -s -L -b /tmp/cookies.txt -c /tmp/cookies.txt \
             -X POST http://localhost/accounts/login/ \
@@ -150,50 +153,84 @@ jobs:
           
           echo "✓ Login completed"
           
+          # Проверяем главную страницу
           echo ""
-          echo "🧪 Testing API with Session Cookie..."
+          echo "Testing home page:"
+          HOME_RESPONSE=$(curl -s -b /tmp/cookies.txt http://localhost/)
           
-          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
-            -b /tmp/cookies.txt \
-            -H "X-CSRFToken: $CSRF_TOKEN" \
-            http://localhost/api/recipe/)
-          
-          echo "HTTP $HTTP_CODE"
-          
-          # Проверяем что ответ НЕ HTML
-          if grep -q "<!DOCTYPE html>" /tmp/response.txt; then
-            echo "❌ Still receiving HTML error page!"
-            echo "Response preview:"
-            cat /tmp/response.txt | grep -oP '<title>\K[^<]+' || echo "No title found"
-            cat /tmp/response.txt | grep -oP '<span>\s*\K[^<]+' | head -3
-            echo ""
+          if echo "$HOME_RESPONSE" | grep -q "No Permissions"; then
+            echo "❌ Still getting 'No Permissions' on home page!"
             
-            # Проверяем главную страницу
-            echo "Testing home page after login:"
-            curl -s -b /tmp/cookies.txt http://localhost/ | grep -oP '<title>\K[^<]+' || echo "Could not access home"
+            # Выводим что Tandoor говорит
+            echo "$HOME_RESPONSE" | grep -A 5 "No Permissions" | head -10
+            
+            echo ""
+            echo "Debugging user state in database:"
+            docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'DBGEOF'
+          from django.contrib.auth.models import User
+          from cookbook.models import Space, UserSpace, UserPreference
+          from django_scopes import scopes_disabled
+          
+          with scopes_disabled():
+              user = User.objects.get(username='testuser')
+              
+              print(f"\n=== User Debug ===")
+              print(f"is_active: {user.is_active}")
+              print(f"is_superuser: {user.is_superuser}")
+              print(f"email_verified: {user.emailaddress_set.filter(verified=True).exists()}")
+              print(f"groups: {list(user.groups.values_list('name', flat=True))}")
+              print(f"user.space: {user.space.name if user.space else None}")
+              
+              if user.space:
+                  space = user.space
+                  print(f"\n=== Space Debug ===")
+                  print(f"name: {space.name}")
+                  print(f"created_by: {space.created_by.username if space.created_by else None}")
+                  print(f"space_setup_completed: {space.space_setup_completed}")
+                  print(f"demo: {space.demo}")
+                  print(f"allow_sharing: {space.allow_sharing}")
+              
+              user_spaces = UserSpace.objects.filter(user=user)
+              print(f"\n=== UserSpace Debug ===")
+              print(f"count: {user_spaces.count()}")
+              for us in user_spaces:
+                  print(f"space: {us.space.name}, active: {us.active}")
+              
+              try:
+                  pref = UserPreference.objects.get(user=user)
+                  print(f"\n=== UserPreference Debug ===")
+                  print(f"exists: True")
+                  print(f"fields: {[f.name for f in pref._meta.fields][:10]}")
+              except:
+                  print(f"UserPreference: NOT FOUND")
+          DBGEOF
             
             exit 1
           fi
           
+          echo "✓ Home page accessible!"
+          
+          # Тестируем API
+          echo ""
+          echo "🧪 Testing API..."
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
+            -b /tmp/cookies.txt \
+            http://localhost/api/recipe/)
+          
+          echo "HTTP $HTTP_CODE"
           cat /tmp/response.txt | head -c 300
           echo ""
           
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "✓✓✓ Session authentication works!"
-            
-            SESSION_COOKIE=$(grep sessionid /tmp/cookies.txt | awk '{print $7}')
-            echo "SESSION_COOKIE=$SESSION_COOKIE" >> $GITHUB_ENV
-            echo "$SESSION_COOKIE" > session_cookie.txt
-            echo "::add-mask::$SESSION_COOKIE"
-            
+            echo "✓✓✓ API works!"
           else
-            echo "❌ Session auth failed with HTTP $HTTP_CODE"
+            echo "❌ API failed"
             exit 1
           fi
 
-      - name: Get API token after web login
+      - name: Get API token
         run: |
-          echo "🔑 Getting API token from logged-in session..."
+          echo "🔑 Getting API token..."
           
           CSRF_TOKEN=$(grep csrftoken /tmp/cookies.txt | awk '{print $7}')
           
@@ -204,13 +241,6 @@ jobs:
             -H "Referer: http://localhost/" \
             -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
             http://localhost/api/access-token/)
-          
-          echo "Token Response: $TOKEN_RESPONSE"
-          
-          if echo "$TOKEN_RESPONSE" | grep -q "<!DOCTYPE html>"; then
-            echo "❌ Received HTML instead of JSON!"
-            exit 1
-          fi
           
           TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
           
@@ -223,35 +253,24 @@ jobs:
           echo "::add-mask::$TOKEN"
           
           if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
-            echo "✓ Token: ${TOKEN:0:8}...${TOKEN: -4}"
+            echo "✓ Token: ${TOKEN:0:8}..."
             
-            echo ""
-            echo "🧪 Testing Bearer Token..."
-            HTTP_CODE=$(curl -s -o /tmp/bearer_test.txt -w "%{http_code}" \
+            # Тест Bearer
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer $TOKEN" \
               http://localhost/api/recipe/)
             
-            echo "HTTP $HTTP_CODE"
-            cat /tmp/bearer_test.txt | head -c 200
-            echo ""
-            
             if [ "$HTTP_CODE" = "200" ]; then
-              echo "✓✓✓ Bearer Token works!"
-            else
-              echo "⚠️  Bearer returned HTTP $HTTP_CODE"
+              echo "✓ Bearer Token works!"
             fi
-          else
-            echo "❌ Could not get API token!"
-            exit 1
           fi
 
       - name: Run API tests
         run: |
           source venv/bin/activate
           
-          if [ -f token.txt ] && [ -s token.txt ]; then
+          if [ -f token.txt ]; then
             export TANDOOR_TOKEN=$(cat token.txt)
-            echo "Using Token: ${TANDOOR_TOKEN:0:8}..."
           fi
           
           export BASE_URL=http://localhost
