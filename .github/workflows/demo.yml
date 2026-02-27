@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Cache dependencies
+      - name: Cache pip dependencies
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -52,187 +52,26 @@ jobs:
           SOCIAL_DEFAULT_GROUP=Default
           EOF
           echo "✓ .env file created"
-          echo "✓ File location: $(pwd)/.env"
-          ls -la .env
 
       - name: Start Docker Compose
         run: |
           docker compose down -v
           docker compose up -d
-          echo "⏳ Waiting for application to be ready..."
-          timeout=60
-          counter=0
-          while [ $counter -lt $timeout ]; do
+          echo "⏳ Waiting for application..."
+          for i in {1..30}; do
             if curl -s http://localhost > /dev/null 2>&1; then
-              echo "✓ Application is ready!"
+              echo "✓ Application ready!"
               break
             fi
-            echo "Waiting... ($counter/$timeout)"
             sleep 2
-            counter=$((counter + 2))
           done
 
       - name: Run database migrations  
         run: |
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
-          echo "✓ Database migrations completed"
+          echo "✓ Migrations completed"
 
-      - name: Show container logs
-        if: always()
-        run: |
-          echo "=== Docker Container Status ==="
-          docker compose ps
-          echo "=== Web Container Logs ==="
-          docker compose logs web_recipes --tail=50
-          
-      - name: Explore Tandoor models structure
-        run: |
-          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from cookbook.models import Space, UserPreference
-          from django.contrib.auth.models import User
-          
-          print("\n=== User Model Fields ===")
-          user_fields = [f.name for f in User._meta.get_fields()]
-          print(user_fields)
-          
-          print("\n=== Space Model Fields ===")
-          space_fields = [f.name for f in Space._meta.get_fields()]
-          print(space_fields)
-          
-          print("\n=== UserPreference Model Fields ===")
-          pref_fields = [f.name for f in UserPreference._meta.get_fields()]
-          print(pref_fields)
-          
-          print("\n=== Relations ===")
-          print("User -> Space relation:", [f.name for f in User._meta.get_fields() if 'space' in f.name.lower()])
-          print("Space -> User relation:", [f.name for f in Space._meta.get_fields() if 'user' in f.name.lower()])
-          EOF
-
-      - name: Create user and token
-        run: |
-          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User, Group, Permission
-          from django.contrib.contenttypes.models import ContentType
-          from cookbook.models import Space, UserPreference, UserSpace, Recipe
-          from allauth.account.models import EmailAddress
-          from django_scopes import scopes_disabled
-          
-          with scopes_disabled():
-              User.objects.filter(username='testuser').delete()
-              
-              # Создаем с is_staff=True для API доступа
-              user = User.objects.create_user(
-                  username='testuser',
-                  password='testpass123',
-                  email='test@example.com',
-                  is_active=True,
-                  is_staff=True,       # ← ИЗМЕНЕНО!
-                  is_superuser=False   # Всё равно НЕ superuser
-              )
-              
-              EmailAddress.objects.get_or_create(
-                  user=user,
-                  email=user.email,
-                  defaults={'verified': True, 'primary': True}
-              )
-              
-              space, _ = Space.objects.get_or_create(
-                  name='Test Space',
-                  defaults={'created_by': user}
-              )
-              
-              if space.created_by != user:
-                  space.created_by = user
-                  space.save()
-              
-              user.space = space
-              user.save()
-              
-              UserSpace.objects.get_or_create(
-                  user=user,
-                  space=space,
-                  defaults={'active': True}
-              )
-              
-              UserPreference.objects.get_or_create(user=user)
-              
-              # Добавляем ВСЕ права на cookbook app
-              group, _ = Group.objects.get_or_create(name='Recipe Users')
-              
-              # Получаем все permissions для cookbook app
-              cookbook_permissions = Permission.objects.filter(
-                  content_type__app_label='cookbook'
-              )
-              
-              for perm in cookbook_permissions:
-                  group.permissions.add(perm)
-              
-              user.groups.add(group)
-              
-              print(f"✓ User: {user.username}")
-              print(f"  is_staff: {user.is_staff}")
-              print(f"  is_superuser: {user.is_superuser}")
-              print(f"  Active space: {user.space.name if user.space else 'None'}")
-              print(f"  Total permissions: {group.permissions.count()}")
-              print(f"  Sample permissions: {list(user.get_all_permissions())[:10]}")
-          EOF
-          
-          sleep 3
-          
-          echo " Waiting for API..."
-          for i in {1..30}; do
-            if curl -s http://localhost/api/ > /dev/null 2>&1; then
-              echo "✓ API ready!"
-              break
-            fi
-            sleep 2
-          done
-          
-          echo " Creating token..."
-          TOKEN_RESPONSE=$(curl -s -X POST \
-            http://localhost/api/access-token/ \
-            -u testuser:testpass123 \
-            -H "Content-Type: application/json" \
-            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}')
-          
-          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
-          
-          if [ -z "$TOKEN" ]; then
-            TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
-          fi
-          
-          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-          echo "$TOKEN" > token.txt
-          echo "::add-mask::$TOKEN"
-          
-          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
-            echo "✓ Token: ${TOKEN:0:8}...${TOKEN: -4}"
-          else
-            echo "❌ Failed!"
-            exit 1
-          fi
-          
-      - name: Check Django logs for permission details
-        run: |
-          echo "🔍 Checking container logs for permission errors..."
-          docker compose logs web_recipes --tail=100 | grep -i "permission\|403\|forbidden" || echo "No permission errors in logs"
-
-      - name: Debug - Check API permissions requirements
-        run: |
-          # Проверяем настройки DRF в контейнере
-          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.conf import settings
-          
-          print("\n=== REST Framework Settings ===")
-          print(f"DEFAULT_PERMISSION_CLASSES: {getattr(settings, 'REST_FRAMEWORK', {}).get('DEFAULT_PERMISSION_CLASSES', 'Not set')}")
-          print(f"DEFAULT_AUTHENTICATION_CLASSES: {getattr(settings, 'REST_FRAMEWORK', {}).get('DEFAULT_AUTHENTICATION_CLASSES', 'Not set')}")
-          
-          print("\n=== Tandoor Settings ===")
-          print(f"SOCIAL_DEFAULT_ACCESS: {getattr(settings, 'SOCIAL_DEFAULT_ACCESS', 'Not set')}")
-          print(f"SOCIAL_DEFAULT_GROUP: {getattr(settings, 'SOCIAL_DEFAULT_GROUP', 'Not set')}")
-          EOF
-
-      - name: Create user with proper cleanup
+      - name: Create user
         run: |
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
           from django.contrib.auth.models import User
@@ -271,88 +110,31 @@ jobs:
               
               print(f"✓ User: {user.username}, Space: {space.name}")
           EOF
-          
-          sleep 3
 
-      - name: Create OAuth2 Application and Token
+      - name: Login via Web and get Session Cookie
         run: |
-          # Создаем OAuth2 приложение и токен
-          OAUTH_DATA=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User
-          from oauth2_provider.models import Application, AccessToken
-          from django.utils import timezone
-          from datetime import timedelta
-          from django_scopes import scopes_disabled
-          import secrets
+          echo "🔐 Logging in via web interface..."
           
-          with scopes_disabled():
-              user = User.objects.get(username='testuser')
-              
-              # Создаем OAuth2 Application
-              app, _ = Application.objects.get_or_create(
-                  name='Test Client',
-                  user=user,
-                  defaults={
-                      'client_type': Application.CLIENT_CONFIDENTIAL,
-                      'authorization_grant_type': Application.GRANT_PASSWORD,
-                      'redirect_uris': '',
-                  }
-              )
-              
-              # Удаляем старые токены
-              AccessToken.objects.filter(user=user).delete()
-              
-              # Создаем OAuth2 Access Token
-              token = AccessToken.objects.create(
-                  user=user,
-                  application=app,
-                  token=secrets.token_urlsafe(40),
-                  expires=timezone.now() + timedelta(days=365),
-                  scope='read write'
-              )
-              
-              # Выводим токен
-              print(token.token)
-          EOF
-          )
+          CSRF_TOKEN=$(curl -s -c /tmp/cookies.txt http://localhost/accounts/login/ \
+            | grep -oP 'csrfmiddlewaretoken.*?value="\K[^"]+' | head -1)
           
-          # Извлекаем токен (последняя строка)
-          TOKEN=$(echo "$OAUTH_DATA" | tail -1)
+          echo "CSRF Token: ${CSRF_TOKEN:0:10}..."
           
-          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-          echo "$TOKEN" > token.txt
-          echo "::add-mask::$TOKEN"
+          curl -s -L -b /tmp/cookies.txt -c /tmp/cookies.txt \
+            -X POST http://localhost/accounts/login/ \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -H "Referer: http://localhost/accounts/login/" \
+            -d "csrfmiddlewaretoken=$CSRF_TOKEN&login=testuser&password=testpass123" \
+            > /dev/null
           
-          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
-            echo "✓ OAuth2 Token: ${TOKEN:0:12}...${TOKEN: -4}"
-          else
-            echo "❌ Failed to create OAuth2 token!"
-            echo "Full output: $OAUTH_DATA"
-            exit 1
-          fi
-
-      - name: Wait for API
-        run: |
-          echo "⏳ Waiting for API..."
-          for i in {1..30}; do
-            if curl -s http://localhost/api/ > /dev/null 2>&1; then
-              echo "✓ API ready!"
-              break
-            fi
-            sleep 2
-          done
-
-      - name: Test OAuth2 Bearer Token
-        run: |
-          if [ -z "$TANDOOR_TOKEN" ]; then
-            export TANDOOR_TOKEN=$(cat token.txt)
-          fi
+          echo "✓ Login completed"
           
-          echo "🧪 Testing OAuth2 Bearer Token..."
-          echo "Token: ${TANDOOR_TOKEN:0:12}...${TANDOOR_TOKEN: -4}"
+          echo ""
+          echo "🧪 Testing API with Session Cookie..."
           
           HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
+            -b /tmp/cookies.txt \
+            -H "X-CSRFToken: $CSRF_TOKEN" \
             http://localhost/api/recipe/)
           
           echo "HTTP $HTTP_CODE"
@@ -360,49 +142,79 @@ jobs:
           echo ""
           
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "✓✓✓ OAuth2 Bearer Token works!"
+            echo "✓✓✓ Session authentication works!"
+            
+            SESSION_COOKIE=$(grep sessionid /tmp/cookies.txt | awk '{print $7}')
+            echo "SESSION_COOKIE=$SESSION_COOKIE" >> $GITHUB_ENV
+            echo "$SESSION_COOKIE" > session_cookie.txt
+            echo "::add-mask::$SESSION_COOKIE"
+            
           else
-            echo "❌ Failed with HTTP $HTTP_CODE"
-            echo ""
-            echo "Full response:"
-            cat /tmp/response.txt
-            echo ""
-            
-            # Проверяем что токен в базе
-            docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from oauth2_provider.models import AccessToken
-          from django_scopes import scopes_disabled
-          
-          with scopes_disabled():
-              tokens = AccessToken.objects.all()[:3]
-              print(f"\n=== OAuth2 Tokens in DB: {tokens.count()} ===")
-              for t in tokens:
-                  print(f"Token: {t.token[:12]}...{t.token[-4:]}")
-                  print(f"User: {t.user.username}")
-                  print(f"Scope: {t.scope}")
-                  print(f"Expires: {t.expires}")
-                  print(f"Valid: {not t.is_expired()}")
-                  print("---")
-          EOF
-            
+            echo "❌ Session auth failed"
+            cat /tmp/cookies.txt
             exit 1
+          fi
+
+      - name: Get API token after web login
+        run: |
+          echo "🔑 Getting API token from logged-in session..."
+          
+          CSRF_TOKEN=$(grep csrftoken /tmp/cookies.txt | awk '{print $7}')
+          
+          TOKEN_RESPONSE=$(curl -s -X POST \
+            -b /tmp/cookies.txt \
+            -H "Content-Type: application/json" \
+            -H "X-CSRFToken: $CSRF_TOKEN" \
+            -H "Referer: http://localhost/" \
+            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
+            http://localhost/api/access-token/)
+          
+          echo "Token Response: $TOKEN_RESPONSE"
+          
+          TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
+          
+          if [ -z "$TOKEN" ]; then
+            TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
+          fi
+          
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "$TOKEN" > token.txt
+          echo "::add-mask::$TOKEN"
+          
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
+            echo "✓ Token: ${TOKEN:0:8}...${TOKEN: -4}"
+            
+            echo ""
+            echo "🧪 Testing Bearer Token..."
+            HTTP_CODE=$(curl -s -o /tmp/bearer_test.txt -w "%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" \
+              http://localhost/api/recipe/)
+            
+            echo "HTTP $HTTP_CODE"
+            cat /tmp/bearer_test.txt | head -c 200
+            echo ""
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✓ Bearer Token works!"
+            else
+              echo "⚠️  Bearer returned HTTP $HTTP_CODE (session cookie works anyway)"
+            fi
+          else
+            echo "⚠️  Could not get API token (using session cookie)"
           fi
 
       - name: Run API tests
         run: |
           source venv/bin/activate
           
-          if [ -z "$TANDOOR_TOKEN" ]; then
+          if [ -f token.txt ] && [ -s token.txt ]; then
             export TANDOOR_TOKEN=$(cat token.txt)
+            echo "Using Token: ${TANDOOR_TOKEN:0:8}..."
           fi
           
-          # Ваш класс использует BASE_URL, не APP_URL
           export BASE_URL=http://localhost
           
           echo "🚀 Running tests..."
-          echo "BASE_URL: $BASE_URL"
-          echo "Token: ${TANDOOR_TOKEN:0:12}..."
-          
           mkdir -p allure-results
           
           pytest tests/ \
@@ -414,30 +226,6 @@ jobs:
         continue-on-error: true
         env:
           BASE_URL: http://localhost
-          TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
-
-      - name: Run API tests
-        run: |
-          source venv/bin/activate
-          
-          if [ -z "$TANDOOR_TOKEN" ]; then
-            export TANDOOR_TOKEN=$(cat token.txt)
-          fi
-          
-          export APP_URL=http://localhost
-          
-          echo " Running tests..."
-          mkdir -p allure-results
-          
-          pytest tests/ \
-            --alluredir=allure-results \
-            -m "api" \
-            -v \
-            --tb=short \
-            -s
-        continue-on-error: true
-        env:
-          APP_URL: http://localhost
           TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
 
       - name: Upload Allure results
