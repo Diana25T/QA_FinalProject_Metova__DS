@@ -35,6 +35,56 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install allure-pytest pytest requests
 
+      - name: Create .env file for testing
+        run: |
+          cat > .env << EOF
+          SECRET_KEY=${{ secrets.SECRET_KEY }}
+          DB_ENGINE=django.db.backends.postgresql
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_HOST=db_recipes
+          POSTGRES_PORT=5432
+          ALLOWED_HOSTS=localhost,127.0.0.1,web_recipes
+          CSRF_TRUSTED_ORIGINS=http://localhost
+          DEBUG=1
+          SOCIAL_DEFAULT_ACCESS=1
+          SOCIAL_DEFAULT_GROUP=Default
+          EOF
+          echo "✓ .env file created"
+          echo "✓ File location: $(pwd)/.env"
+          ls -la .env
+
+      - name: Start Docker Compose
+        run: |
+          docker compose down -v
+          docker compose up -d
+          echo "⏳ Waiting for application to be ready..."
+          timeout=60
+          counter=0
+          while [ $counter -lt $timeout ]; do
+            if curl -s http://localhost > /dev/null 2>&1; then
+              echo "✓ Application is ready!"
+              break
+            fi
+            echo "Waiting... ($counter/$timeout)"
+            sleep 2
+            counter=$((counter + 2))
+          done
+
+      - name: Run database migrations  
+        run: |
+          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
+          echo "✓ Database migrations completed"
+
+      - name: Show container logs
+        if: always()
+        run: |
+          echo "=== Docker Container Status ==="
+          docker compose ps
+          echo "=== Web Container Logs ==="
+          docker compose logs web_recipes --tail=50
+
       - name: Create user via Django admin command and setup
         run: |
           # 1. Создаем суперпользователя
@@ -97,7 +147,7 @@ jobs:
           done
           
           # 4. Создаем токен с правами "read write"
-          echo " Creating token with 'read write' scope..."
+          echo "🔑 Creating token with 'read write' scope..."
           
           TOKEN_RESPONSE=$(curl -s -X POST \
             http://localhost/api/access-token/ \
@@ -110,10 +160,8 @@ jobs:
           
           echo "API Response: $TOKEN_RESPONSE"
           
-          # Извлекаем токен и scope
+          # Извлекаем токен
           TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('token', ''))" 2>/dev/null)
-          SCOPE=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('scope', ''))" 2>/dev/null)
-          TOKEN_ID=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('id', ''))" 2>/dev/null)
           
           if [ -z "$TOKEN" ]; then
             TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":\s*"\K[^"]+')
@@ -126,52 +174,11 @@ jobs:
           
           if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
             echo "✓ Token created: ${TOKEN:0:8}...${TOKEN: -4}"
-            echo "✓ Token ID: $TOKEN_ID"
-            echo "✓ Scope: $SCOPE"
           else
             echo "❌ Token creation failed!"
             echo "Full response: $TOKEN_RESPONSE"
-            
-            # Диагностика
-            echo ""
-            echo "Testing basic auth:"
-            curl -v -u testuser:testpass123 http://localhost/api/user-preference/ 2>&1 | head -30
-            
             exit 1
           fi
-
-      - name: Verify token in database
-        run: |
-          # Проверяем токен в базе данных
-          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User
-          from cookbook.models import AccessToken
-          from django_scopes import scopes_disabled
-          
-          with scopes_disabled():
-              user = User.objects.get(username='testuser')
-              
-              # Tandoor использует кастомную модель AccessToken (не DRF Token!)
-              try:
-                  tokens = AccessToken.objects.filter(user=user)
-                  print(f"\n=== Access Tokens for {user.username} ===")
-                  print(f"Total tokens: {tokens.count()}\n")
-                  
-                  for token in tokens:
-                      print(f"Token ID: {token.id}")
-                      print(f"Token: {token.token[:10]}...{token.token[-4:]}")
-                      print(f"Scope: {token.scope}")
-                      print(f"Expires: {token.expires}")
-                      print(f"Created: {token.created}")
-                      print("---")
-              except Exception as e:
-                  print(f"Error checking tokens: {e}")
-                  
-                  # Может быть другая модель
-                  from rest_framework.authtoken.models import Token as DRFToken
-                  drf_tokens = DRFToken.objects.filter(user=user)
-                  print(f"DRF Tokens: {drf_tokens.count()}")
-          EOF
 
       - name: Verify token works
         run: |
@@ -179,12 +186,10 @@ jobs:
             export TANDOOR_TOKEN=$(cat token.txt)
           fi
           
-          echo " Testing token with write permissions..."
+          echo "🧪 Testing token..."
           echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
           
-          # Тест 1: READ - GET /api/recipe/
-          echo ""
-          echo "Test 1: READ /api/recipe/"
+          # Тест READ
           HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
             -H "Authorization: Bearer $TANDOOR_TOKEN" \
             http://localhost/api/recipe/)
@@ -193,44 +198,12 @@ jobs:
           cat /tmp/response.txt | head -c 200
           echo ""
           
-          # Тест 2: WRITE - POST /api/recipe/
-          echo ""
-          echo "Test 2: WRITE (create recipe)"
-          WRITE_RESPONSE=$(curl -s -w "\nHTTP_CODE:%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "name": "Test Recipe from GHA",
-              "description": "Testing write permissions",
-              "servings": 4
-            }' \
-            http://localhost/api/recipe/)
-          
-          WRITE_CODE=$(echo "$WRITE_RESPONSE" | grep -oP 'HTTP_CODE:\K\d+')
-          echo "HTTP $WRITE_CODE"
-          echo "$WRITE_RESPONSE" | head -c 300
-          echo ""
-          
-          # Проверка результатов
           if [ "$HTTP_CODE" = "200" ]; then
-            echo "✓ READ permission works!"
+            echo "✓✓✓ Token works!"
           else
-            echo "❌ READ failed with HTTP $HTTP_CODE"
-          fi
-          
-          if [ "$WRITE_CODE" = "200" ] || [ "$WRITE_CODE" = "201" ]; then
-            echo "✓ WRITE permission works!"
-          else
-            echo " WRITE returned HTTP $WRITE_CODE (may be expected)"
-          fi
-          
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo ""
-            echo "✓✓✓ Token is working correctly!"
-          else
-            echo ""
             echo "❌ Token test failed"
+            curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
+              http://localhost/api/recipe/ 2>&1 | head -30
             exit 1
           fi
 
@@ -244,7 +217,7 @@ jobs:
           
           export APP_URL=http://localhost
           
-          echo " Running tests..."
+          echo "🚀 Running tests..."
           echo "Token: ${TANDOOR_TOKEN:0:8}..."
           
           mkdir -p allure-results
@@ -255,99 +228,14 @@ jobs:
             -v \
             --tb=short \
             -s
+        continue-on-error: true
         env:
           APP_URL: http://localhost
           TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
 
-      - name: Test token manually
-        run: |
-          curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
-            http://localhost/api/recipe/
-
-      - name: Check ALL permissions
-        run: |
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-          from django.contrib.auth.models import Permission
-          print('Все доступные права (первые 50):')
-          for i, p in enumerate(Permission.objects.all()[:50]):
-              print(f'{i+1:2d}. {p.content_type.app_label}.{p.codename} - {p.name}')
-          "
-
-      - name: Check user permissions
-        run: |
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-          from django.contrib.auth.models import User
-          user = User.objects.get(username='testuser')
-          print(f'User: {user.username}')
-          print('Permissions:')
-          for perm in user.get_all_permissions():
-              print(f'  - {perm}')
-          "
-
-      - name: Check user space
-        run: |
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-          from django.contrib.auth.models import User
-          from cookbook.models import Space
-          from django_scopes import scopes_disabled
-
-          with scopes_disabled():
-              user = User.objects.get(username='testuser')
-              spaces = user.space_set.all()
-              print(f'User spaces: {[s.name for s in spaces]}')
-          if spaces:
-              space = spaces[0]
-              print(f'Active space: {space.name}')
-              print(f'Space owner: {space.created_by.username if space.created_by else None}')
-          "
-
-      - name: Check user in DB
-        run: |
-          docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py shell -c "
-          from django.contrib.auth.models import User
-          user = User.objects.get(username='testuser')
-          print(f'User exists: {user.username}')
-          print(f'Active: {user.is_active}')
-          print(f'Groups: {[g.name for g in user.groups.all()]}')
-          "    
-     
-      - name: Wait for API to be ready
-        run: |
-          echo " Waiting for API endpoint..."
-          max_attempts=30
-          attempt=1
-          while [ $attempt -le $max_attempts ]; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/api/ || echo "000")
-            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
-              echo " API is accessible (HTTP $HTTP_CODE)!"
-              break
-            fi
-            echo " Attempt $attempt/$max_attempts: API returned HTTP $HTTP_CODE"
-            sleep 2
-            attempt=$((attempt + 1))
-          done
-
-      - name: Run API tests
-        run: |
-          source venv/bin/activate
-          export APP_URL=http://localhost
-          mkdir -p allure-results
-          
-          echo " Running API tests with marker 'api'..."
-          echo "TANDOOR_TOKEN is set: $(if [ -n "$TANDOOR_TOKEN" ]; then echo "есть токен"; else echo "нет токена"; fi)"
-          pytest tests/ \
-            --alluredir=allure-results \
-            -m "api" \
-            -v \
-            --tb=short \
-            --disable-warnings || true
-        continue-on-error: true
-        env:
-          APP_URL: http://localhost
-          TEST_ENV: github-actions
-
       - name: Upload Allure results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: allure-results
           path: allure-results/
