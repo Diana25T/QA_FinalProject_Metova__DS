@@ -71,11 +71,12 @@ jobs:
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
           echo "✓ Migrations completed"
 
-      - name: Create user with group
+      - name: Create user with permissions
         run: |
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-          from django.contrib.auth.models import User, Group
-          from cookbook.models import Space, UserPreference, UserSpace
+          from django.contrib.auth.models import User, Group, Permission
+          from django.contrib.contenttypes.models import ContentType
+          from cookbook.models import Space, UserPreference, UserSpace, Recipe
           from allauth.account.models import EmailAddress
           from django_scopes import scopes_disabled
           
@@ -91,8 +92,19 @@ jobs:
                   email='test@example.com'
               )
               
-              # КРИТИЧНО: Добавляем в группу Default!
+              # Создаем группу Default с ПРАВАМИ
               group, created = Group.objects.get_or_create(name='Default')
+              
+              # Добавляем ВСЕ права на cookbook app
+              cookbook_perms = Permission.objects.filter(
+                  content_type__app_label='cookbook'
+              )
+              
+              print(f"Adding {cookbook_perms.count()} permissions to Default group...")
+              
+              for perm in cookbook_perms:
+                  group.permissions.add(perm)
+              
               user.groups.add(group)
               
               EmailAddress.objects.get_or_create(
@@ -113,8 +125,11 @@ jobs:
               UserPreference.objects.get_or_create(user=user)
               
               print(f"✓ User: {user.username}")
+              print(f"  is_superuser: {user.is_superuser}")
               print(f"  Groups: {[g.name for g in user.groups.all()]}")
+              print(f"  Group permissions: {group.permissions.count()}")
               print(f"  Space: {space.name}")
+              print(f"  User permissions (first 10): {list(user.get_all_permissions())[:10]}")
           EOF
 
       - name: Login via Web and get Session Cookie
@@ -147,9 +162,16 @@ jobs:
           
           # Проверяем что ответ НЕ HTML
           if grep -q "<!DOCTYPE html>" /tmp/response.txt; then
-            echo "❌ Received HTML instead of JSON!"
-            cat /tmp/response.txt | head -c 500
+            echo "❌ Still receiving HTML error page!"
+            echo "Response preview:"
+            cat /tmp/response.txt | grep -oP '<title>\K[^<]+' || echo "No title found"
+            cat /tmp/response.txt | grep -oP '<span>\s*\K[^<]+' | head -3
             echo ""
+            
+            # Проверяем главную страницу
+            echo "Testing home page after login:"
+            curl -s -b /tmp/cookies.txt http://localhost/ | grep -oP '<title>\K[^<]+' || echo "Could not access home"
+            
             exit 1
           fi
           
@@ -185,11 +207,8 @@ jobs:
           
           echo "Token Response: $TOKEN_RESPONSE"
           
-          # Проверяем что это JSON, а не HTML
           if echo "$TOKEN_RESPONSE" | grep -q "<!DOCTYPE html>"; then
             echo "❌ Received HTML instead of JSON!"
-            echo "$TOKEN_RESPONSE" | head -c 500
-            echo ""
             exit 1
           fi
           
