@@ -137,6 +137,38 @@ jobs:
               print(f"  UserSpace active: {user_space.active}")
           EOF
 
+      - name: Debug Space selection
+        run: |
+          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.contrib.auth.models import User
+          from cookbook.models import Space, UserSpace
+          from django_scopes import scopes_disabled
+          
+          with scopes_disabled():
+              user = User.objects.get(username='testuser')
+              
+              print("\n=== Checking Space relations ===")
+              print(f"User fields with 'space': {[f.name for f in user._meta.get_fields() if 'space' in f.name.lower()]}")
+              
+              # Проверяем reverse relation
+              print(f"\nUser.space_set (if exists): {hasattr(user, 'space_set')}")
+              if hasattr(user, 'space_set'):
+                  spaces = user.space_set.all()
+                  print(f"Spaces via space_set: {[s.name for s in spaces]}")
+              
+              # Проверяем через UserSpace
+              user_spaces = UserSpace.objects.filter(user=user)
+              print(f"\nUserSpace entries: {user_spaces.count()}")
+              for us in user_spaces:
+                  print(f"  - {us.space.name} (active: {us.active})")
+                  print(f"    UserSpace fields: {[f.name for f in us._meta.get_fields()]}")
+          EOF
+
+      - name: Check Tandoor session/middleware
+        run: |
+          echo "Checking container logs for space selection hints..."
+          docker compose logs web_recipes 2>&1 | grep -i "space\|permission" | tail -30 || echo "No relevant logs"
+
       - name: Login via Web
         run: |
           echo "🔐 Logging in..."
