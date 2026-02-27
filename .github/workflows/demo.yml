@@ -85,15 +85,13 @@ jobs:
 
       - name: Create test user and token
         run: |
-          # Создаем пользователя и получаем токен
-          TOKEN=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF' | grep -E '^[a-f0-9]{40}$'
+          # 1. Создаем пользователя
+          docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
           from django.contrib.auth.models import User, Group, Permission
           from django.contrib.contenttypes.models import ContentType
           from cookbook.models import UserPreference, Space, Recipe
           from allauth.account.models import EmailAddress
-          from rest_framework.authtoken.models import Token
           from django_scopes import scopes_disabled
-          from datetime import datetime, timedelta
           
           with scopes_disabled():
               space, _ = Space.objects.get_or_create(name='Default Space')
@@ -124,66 +122,87 @@ jobs:
               space.created_by = user
               space.save()
               
-              Token.objects.filter(user=user).delete()
-              token = Token.objects.create(user=user)
-              
-              if hasattr(token, 'expires'):
-                  token.expires = datetime.now() + timedelta(days=365)
-                  token.save()
-              
-              print(token.key)
+              print("User created")
           EOF
-          )
           
-          # Убираем переносы строк и пробелы
-          TOKEN=$(echo "$TOKEN" | tr -d '\n\r ')
+          # 2. Ждем готовности API
+          echo "⏳ Waiting for API..."
+          for i in {1..30}; do
+            if curl -s http://localhost/api/ > /dev/null 2>&1; then
+              echo "✓ API ready!"
+              break
+            fi
+            sleep 2
+          done
           
-          # Сохраняем токен в ENV и файл
+          # 3. Получаем токен через API с scope!
+          echo " Getting token via API..."
+          
+          TOKEN_RESPONSE=$(curl -s -X POST \
+            -u testuser:testpass123 \
+            -H "Content-Type: application/json" \
+            -d '{"expires": "2026-12-31T23:59:59Z", "scope": "read write"}' \
+            http://localhost/api/access-token/)
+          
+          echo "API Response: $TOKEN_RESPONSE"
+          
+          # Извлекаем токен из JSON
+          TOKEN=$(echo "$TOKEN_RESPONSE" | grep -oP '"token":"\K[^"]+')
+          
+          # Если grep не сработал, пробуем python
+          if [ -z "$TOKEN" ]; then
+            TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null)
+          fi
+          
+          # Сохраняем
           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
           echo "$TOKEN" > token.txt
           echo "::add-mask::$TOKEN"
           
           # Проверка
-          if [ -n "$TOKEN" ] && [ ${#TOKEN} -eq 40 ]; then
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
             echo "✓ Token created: ${TOKEN:0:8}...${TOKEN: -4}"
           else
-            echo "❌ Invalid token! Length: ${#TOKEN}"
-            echo "Raw output: '$TOKEN'"
+            echo "❌ Failed to get token!"
+            echo "Response was: $TOKEN_RESPONSE"
             exit 1
           fi
 
-      - name: Debug - Test token
+      - name: Debug - Test token with Bearer
         run: |
-          echo " Testing token..."
+          echo " Testing token with Bearer..."
           
-          # Проверяем что токен в ENV
           if [ -z "$TANDOOR_TOKEN" ]; then
-            echo "  Token not in ENV, reading from file..."
             export TANDOOR_TOKEN=$(cat token.txt)
           fi
           
           echo "Token: ${TANDOOR_TOKEN:0:8}...${TANDOOR_TOKEN: -4}"
           
-          # Тестируем curl'ом
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          # Тестируем с Bearer (как в документации)
+          HTTP_CODE=$(curl -s -o /tmp/response.txt -w "%{http_code}" \
             -H "Authorization: Bearer $TANDOOR_TOKEN" \
             http://localhost/api/recipe/)
           
           echo "HTTP Response: $HTTP_CODE"
+          echo "Response body:"
+          cat /tmp/response.txt | head -c 300
+          echo ""
           
           if [ "$HTTP_CODE" = "200" ]; then
             echo "✓ Token works!"
           else
             echo "❌ Token test failed!"
+            echo ""
+            echo "Full curl output:"
             curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
-              http://localhost/api/recipe/ 2>&1 | head -20
+              http://localhost/api/recipe/ 2>&1 | head -30
+            exit 1
           fi
-          
+
       - name: Run API tests
         run: |
           source venv/bin/activate
           
-          # Гарантируем что токен установлен
           if [ -z "$TANDOOR_TOKEN" ]; then
             export TANDOOR_TOKEN=$(cat token.txt)
           fi
@@ -205,7 +224,6 @@ jobs:
         env:
           APP_URL: http://localhost
           TANDOOR_TOKEN: ${{ env.TANDOOR_TOKEN }}
-
 
       - name: Test token manually
         run: |
