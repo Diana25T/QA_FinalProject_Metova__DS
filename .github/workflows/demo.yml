@@ -71,6 +71,32 @@ jobs:
           docker compose exec -T web_recipes /opt/recipes/venv/bin/python manage.py migrate
           echo "✓ Migrations completed"
 
+      - name: Wait for database and migrations to complete
+        run: |
+              echo "⏳ Waiting for database to be ready..."
+              timeout=60
+              counter=0
+              while [ $counter -lt $timeout ]; do
+                if docker compose logs web_recipes 2>&1 | grep -q "Starting gunicorn"; then
+                  echo "✅ Web container is ready!"
+                  break
+                fi
+                echo "Still waiting... ($counter/$timeout)"
+                sleep 2
+                counter=$((counter+2))
+              done
+              
+              # Дополнительная пауза для завершения миграций
+              sleep 10
+              
+              echo "📊 Checking database status..."
+              docker compose exec -T db_recipes pg_isready -U django -d recipes || echo "DB not ready yet"
+              
+              # Проверяем логи на ошибки БД
+              if docker compose logs web_recipes | grep -q "IntegrityError"; then
+                echo "⚠️ Database integrity error detected, continuing anyway..."
+              fi
+    
       - name: Create user with active space
         run: |
           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
