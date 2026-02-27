@@ -83,180 +83,78 @@ jobs:
           echo "=== Web Container Logs ==="
           docker compose logs web_recipes --tail=50
 
-          - name: Create test user and token
-            run: |
-           # Создаем пользователя через Django shell
-           docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-           from django.contrib.auth.models import User, Group, Permission
-           from django.contrib.contenttypes.models import ContentType
-           from cookbook.models import UserPreference, Space, Recipe
-           from allauth.account.models import EmailAddress
-           from django_scopes import scopes_disabled
-           
-           with scopes_disabled():
-               space, _ = Space.objects.get_or_create(name='Default Space')
-               group, _ = Group.objects.get_or_create(name='Default')
-               
-               recipe_ct = ContentType.objects.get_for_model(Recipe)
-               recipe_perms = []
-               for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
-                   perm, created = Permission.objects.get_or_create(
-                       codename=codename,
-                       content_type=recipe_ct,
-                       defaults={'name': f'Can {codename.replace("_", " ")}'}
-                   )
-                   recipe_perms.append(perm)
-               
-               group.permissions.add(*recipe_perms)
-               User.objects.filter(username='testuser').delete()
-               
-               user = User.objects.create_user(
-                   username='testuser',
-                   password='testpass123',
-                   email='test@example.com',
-                   is_active=True
-               )
-               
-               user.groups.add(group)
-               
-               EmailAddress.objects.create(
-                   user=user,
-                   email=user.email,
-                   verified=True,
-                   primary=True
-               )
-               
-               user.space_set.add(space)
-               space.created_by = user
-               space.save()
-               UserPreference.objects.get_or_create(user=user)
-               
-               print("✓ User created successfully")
-           EOF
-           
-           # Ждем готовности API
-           echo " Waiting for API to be ready..."
-           timeout=30
-           counter=0
-           while [ $counter -lt $timeout ]; do
-             if curl -s http://localhost/api/ > /dev/null 2>&1; then
-               echo "✓ API is ready!"
-               break
-             fi
-             sleep 2
-             counter=$((counter + 2))
-           done
-           
-           # Способ 1: Пытаемся получить токен через API
-           echo " Attempting to get token via API..."
-           TOKEN=$(docker compose exec -T web_recipes /opt/recipes/venv/bin/python -c "
-           import requests
-           import sys
-           
-           try:
-               # Используем internal порт контейнера
-               response = requests.post(
-                   'http://web_recipes:8080/api/access-token/',
-                   auth=('testuser', 'testpass123'),
-                   json={'expires': '2026-12-31T23:59:59Z', 'scope': 'read write'},
-                   timeout=10
-               )
-               
-               if response.status_code == 200:
-                   token = response.json().get('token', '')
-                   if token:
-                       print(token)
-                       sys.exit(0)
-               
-               print(f'API_ERROR_HTTP_{response.status_code}', file=sys.stderr)
-           except Exception as e:
-               print(f'API_ERROR: {str(e)}', file=sys.stderr)
-           " 2>&1)
-           
-           # Способ 2: Если API не сработало, создаем токен напрямую через Django
-           if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ] || [[ "$TOKEN" == *"ERROR"* ]]; then
-             echo "  API method failed, creating token directly via Django..."
-             
-             TOKEN=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-           from django.contrib.auth.models import User
-           from rest_framework.authtoken.models import Token
-           from django_scopes import scopes_disabled
-           from datetime import datetime, timedelta
-           
-           try:
-               with scopes_disabled():
-                   user = User.objects.get(username='testuser')
-                   
-                   # Удаляем старые токены этого пользователя
-                   Token.objects.filter(user=user).delete()
-                   
-                   # Создаем новый токен
-                   token = Token.objects.create(user=user)
-                   
-                   # Если есть поле expires, устанавливаем срок действия
-                   if hasattr(token, 'expires'):
-                       token.expires = datetime.now() + timedelta(days=365)
-                       token.save()
-                   
-                   print(token.key)
-           except Exception as e:
-               print(f'DJANGO_ERROR: {str(e)}')
-           EOF
-           )
-           fi
-           
-           # Сохраняем токен и маскируем его в логах
-           echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
-           echo "::add-mask::$TOKEN"
-           
-           # Финальная проверка
-           if [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] && [[ "$TOKEN" != *"ERROR"* ]]; then
-             echo " Token successfully created: ${TOKEN:0:8}...${TOKEN: -4}"
-             echo "TOKEN_LENGTH=${#TOKEN}"
-           else
-             echo " Failed to create token!"
-             echo ""
-             echo " Debugging information:"
-             
-             # Выводим отладочную информацию
-             docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
-           from django.contrib.auth.models import User
-           from rest_framework.authtoken.models import Token
-           from cookbook.models import Space
-           from django_scopes import scopes_disabled
-           
-           with scopes_disabled():
-               print("\n=== Users (first 5) ===")
-               for user in User.objects.all()[:5]:
-                   print(f"  • {user.username} (active: {user.is_active}, email: {user.email})")
-                   print(f"    Groups: {[g.name for g in user.groups.all()]}")
-                   print(f"    Permissions: {user.get_all_permissions()}")
-               
-               print("\n=== Tokens (first 5) ===")
-               tokens = Token.objects.all()[:5]
-               if tokens:
-                   for token in tokens:
-                       print(f"  • User: {token.user.username}")
-                       print(f"    Token: {token.key[:10]}...{token.key[-4:]}")
-                       if hasattr(token, 'expires'):
-                           print(f"    Expires: {token.expires}")
-               else:
-                   print("  No tokens found!")
-               
-               print("\n=== Spaces (first 5) ===")
-               for space in Space.objects.all()[:5]:
-                   print(f"  • {space.name}")
-                   print(f"    Owner: {space.created_by.username if space.created_by else 'None'}")
-                   print(f"    Users: {[u.username for u in space.user.all()[:3]]}")
-           EOF
-             
-             echo ""
-             echo " Container logs (last 30 lines):"
-             docker compose logs web_recipes --tail=30
-             
-             exit 1
-           fi
-           
+      - name: Create test user and token
+        run: |
+          # Создаем пользователя и получаем токен
+          TOKEN=$(docker compose exec -T web_recipes sh -c "cd /opt/recipes && venv/bin/python manage.py shell" << 'EOF'
+          from django.contrib.auth.models import User, Group, Permission
+          from django.contrib.contenttypes.models import ContentType
+          from cookbook.models import UserPreference, Space, Recipe
+          from allauth.account.models import EmailAddress
+          from rest_framework.authtoken.models import Token
+          from django_scopes import scopes_disabled
+          from datetime import datetime, timedelta
+          
+          with scopes_disabled():
+              # Создаем пространство и группу
+              space, _ = Space.objects.get_or_create(name='Default Space')
+              group, _ = Group.objects.get_or_create(name='Default')
+              
+              # Добавляем права на рецепты
+              recipe_ct = ContentType.objects.get_for_model(Recipe)
+              for codename in ['add_recipe', 'change_recipe', 'delete_recipe', 'view_recipe']:
+                  perm, _ = Permission.objects.get_or_create(
+                      codename=codename,
+                      content_type=recipe_ct,
+                      defaults={'name': f'Can {codename.replace("_", " ")}'}
+                  )
+                  group.permissions.add(perm)
+              
+              # Удаляем старого пользователя
+              User.objects.filter(username='testuser').delete()
+              
+              # Создаем пользователя
+              user = User.objects.create_user(
+                  username='testuser',
+                  password='testpass123',
+                  email='test@example.com',
+                  is_active=True
+              )
+              
+              # Настройки пользователя
+              user.groups.add(group)
+              user.space_set.add(space)
+              EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
+              UserPreference.objects.get_or_create(user=user)
+              space.created_by = user
+              space.save()
+              
+              # Создаем токен
+              Token.objects.filter(user=user).delete()
+              token = Token.objects.create(user=user)
+              
+              if hasattr(token, 'expires'):
+                  token.expires = datetime.now() + timedelta(days=365)
+                  token.save()
+              
+              # Выводим только токен
+              print(token.key)
+          EOF
+          )
+          
+          # Сохраняем токен
+          echo "TANDOOR_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "::add-mask::$TOKEN"
+          
+          # Проверяем
+          if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 10 ]; then
+            echo "✓ Token created: ${TOKEN:0:8}..."
+          else
+            echo "❌ Token creation failed"
+            docker compose logs web_recipes --tail=20
+            exit 1
+          fi
+
       - name: Test token manually
         run: |
           curl -v -H "Authorization: Bearer $TANDOOR_TOKEN" \
