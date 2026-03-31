@@ -227,4 +227,4 @@ postgresql/
 .idea/git log --all --full-history -- .gitlab-ci.yml
 !docker-compose.example.yml
 !.env.example
-.idea/
+.idea/docker-compose.yml
