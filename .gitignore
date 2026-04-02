@@ -228,3 +228,8 @@ postgresql/
 !docker-compose.example.yml
 !.env.example
 .idea/docker-compose.yml
+imported_recipes_cache.backup.json
+.idea/
+.env
+imported_recipes_cache.json
+
